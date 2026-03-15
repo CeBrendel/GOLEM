@@ -1,5 +1,5 @@
 
-pub trait Move where {
+pub trait Move {
     fn as_str(&self) -> &str;
     fn from_algebraic(s: &str) -> Self;
 }
