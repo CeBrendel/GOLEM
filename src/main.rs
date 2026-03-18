@@ -4,29 +4,15 @@
 
 pub mod uci;
 pub mod board;
+pub mod search;
 
-use uci::parse_uci_command;
-use board::dummy_board::DummyBoard;
+use uci::uci_loop;
+use board::dummy_board::{DummyMove, DummyBoard};
+use search::dummy_search::dummy_search;
 
-/*
-TODO:
-    - Default for Board
-    - assert that all in- or outgoing command end with "\n"
-*/
-
-pub fn main() -> std::io::Result<()> {
+pub fn main() {
     
-    let stdin = std::io::stdin();
-    let board: &mut DummyBoard = &mut DummyBoard{fen_like_base_position: String::from("empty"), pushed_moves: Vec::new()};
+    // start UCI loop using DummyBoard, DummyMove and the dummy_search
+    uci_loop::<DummyMove, DummyBoard>(dummy_search).unwrap();
 
-    loop {
-
-        // read command from stdin
-        let command = &mut String::new();
-        stdin.read_line(command)?;
-
-        // parse command
-        parse_uci_command(command, board);
-
-    }
 }

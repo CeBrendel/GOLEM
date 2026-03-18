@@ -1,14 +1,18 @@
 
+pub mod channeling;
 
-use std::process;
 use crate::board::traits::{Move, Board};
+use crate::search::SearchInfo;
+use crate::uci::channeling::{channel, Sender, Receiver};
 
 use std::str::SplitWhitespace;
 use std::iter::Peekable;
+use std::{thread, thread::JoinHandle};
+use std::sync::{Arc, Mutex};
 
 
-#[derive(Debug, Default)]
-struct SearchInstruction {
+#[derive(Debug, Default, Clone)]
+pub struct SearchInstruction {
     // TODO: ponder, nodes, mate
     searchmoves: Option<Vec<String>>,
     wtime_in_ms: Option<usize>,
@@ -20,6 +24,8 @@ struct SearchInstruction {
     movetime_in_ms: Option<usize>,
     infinite: bool
 }
+
+type Search<M, B> = fn(&mut B, SearchInstruction, &Receiver<bool>, &Sender<SearchInfo<M>>) -> ();
 
 impl SearchInstruction {
     pub fn visualize(&self) {
@@ -49,8 +55,6 @@ impl SearchInstruction {
     }
 }
 
-
-
 fn pop_first(s: &str) -> (&str, &str) {
     return match s.split_once(char::is_whitespace) {
         Option::None                     => (s, ""),
@@ -73,10 +77,10 @@ fn handle_isready() {
 
 fn handle_quit() {
     // TODO: This is not what we want! E. g. print bestmove.
-    process::exit(0)
+    std::process::exit(0)
 }
 
-fn handle_position<M: Move, B: Board<M>>(s: &str, board: &mut B) {
+fn handle_position<M: Move, B: Board<M>>(s: &str, board: Arc<Mutex<B>>) {
 
     // get keyword
     let (startpos_or_fen_keyword, tail) = pop_first(s);
@@ -86,6 +90,9 @@ fn handle_position<M: Move, B: Board<M>>(s: &str, board: &mut B) {
         Option::None      => (tail, Option::None),
         Option::Some(idx) => (&tail[..idx], Option::Some(&tail[idx+5..]))
     };
+
+    // acquire lock of board
+    let mut board = board.lock().expect("Acquiring lock failed. Mutex is probably poisoned!");
 
     // parse startpos and fen keyword
     match startpos_or_fen_keyword {
@@ -108,7 +115,7 @@ fn handle_position<M: Move, B: Board<M>>(s: &str, board: &mut B) {
                 board.make(r#move);
             }
 
-        }
+        }   
     }
 
     // show board after handling of command
@@ -157,7 +164,7 @@ fn collect_blocks_until_next_keyword_or_end(blocks: &mut Peekable<SplitWhitespac
     return collected_blocks;
 }
 
-fn handle_go<M: Move, B: Board<M>>(s: &str, board: &mut B) -> SearchInstruction {
+fn handle_go(s: &str, search_instruction_tx: &Sender<SearchInstruction>) {
 
     // make empty SearchInstruction
     let mut search_instructions = SearchInstruction::default();
@@ -220,11 +227,34 @@ fn handle_go<M: Move, B: Board<M>>(s: &str, board: &mut B) -> SearchInstruction 
 
     search_instructions.visualize();
 
-    return search_instructions;
+    // send search instruction to search thread
+    search_instruction_tx.send(search_instructions);
 
 }
 
-pub fn parse_uci_command<M: Move, B: Board<M>>(command: &str, board: &mut B) {
+fn handle_stop<M: Move>(stop_tx: &Sender<bool>, search_info_rx: &Receiver<SearchInfo<M>>) {
+
+    // send stop signal to search thread
+    stop_tx.send(true);
+
+    // emit bestmove
+    let search_info = match search_info_rx.recv() {
+        Option::None                => panic!("No search info was supplied by the search thread!"),
+        Option::Some(search_info)   => search_info
+    };
+    let bestmove = search_info.r#move.expect("Search did not return a move!");
+    let bestmove_str = bestmove.as_str();
+    println!("bestmove {}\n", bestmove_str);
+
+}
+
+fn parse_and_handle_uci_command<M: Move, B: Board<M>>(
+    command: &str,
+    board: Arc<Mutex<B>>,
+    search_instruction_tx: &Sender<SearchInstruction>,
+    stop_tx: &Sender<bool>,
+    search_info_rx: &Receiver<SearchInfo<M>>
+) {
 
     // remove linebreaks from command
     let command = command.trim();
@@ -236,12 +266,86 @@ pub fn parse_uci_command<M: Move, B: Board<M>>(command: &str, board: &mut B) {
         "uci"           => handle_uci(),
         "isready"       => handle_isready(),
         "position"      => handle_position(tail, board),
-        "go"            => {handle_go(tail, board);},
-        "stop"          => todo!(),
+        "go"            => handle_go(tail, search_instruction_tx),
+        "stop"          => handle_stop(stop_tx, search_info_rx),
         "ucinewgame"    => todo!("Engine does not currently support the \"ucinewgame\" command!"),
         "ponderhit"     => todo!("Engine does not currently support pondering!"),
         "setoption"     => todo!(),
         "quit"          => handle_quit(),
         _               => panic!("Unrecognized command!")
     }
+}
+
+fn spawn_search_thread<M: Move, B: Board<M>>(
+    board: Arc<Mutex<B>>,
+    search_instruction_rx: Receiver<SearchInstruction>,
+    search_info_tx: Sender<SearchInfo<M>>,
+    stop_rx: Receiver<bool>,
+    search: Search<M, B>
+) -> JoinHandle<()> {
+    return thread::spawn(move || {
+
+        // duration between successive queries of the search_info channel for instructions
+        // TODO: This should be a static somewhere or live in some config
+        let retry_duration = std::time::Duration::from_millis(10);
+
+        loop {
+            
+            // listen for instructions
+            match search_instruction_rx.recv() {
+                Option::None                     => thread::sleep(retry_duration),
+                Option::Some(search_instruction) => {
+                    
+                    // acquire lock of board and do the search (and listen for stop signals)
+                    let mut locked_board = board.lock().expect("Acquiring of lock failed. Mutex is probably poisoned!");
+                    
+                    // dummy search
+                    search(&mut locked_board, search_instruction, &stop_rx, &search_info_tx);
+                }
+            }
+        }
+    });
+}
+
+pub fn uci_loop<M: Move, B: Board<M>>(search: Search<M, B>) -> std::io::Result<()> where B: Default {
+
+    // main thread owns stdin and is the only thread to write to it
+    let stdin = std::io::stdin();
+
+    // make a new board and wrap it in a Arc-Mutex, so that both threads can modify it
+    let board = B::default();
+    let board_ref = Arc::new(Mutex::new(board));
+    let board_ref_for_search_thread = Arc::clone(&board_ref);
+
+    // channels for communicating between the main and the search thread
+    let (search_instruction_tx, search_instruction_rx) = channel::<SearchInstruction>();
+    let (stop_tx, stop_rx) = channel::<bool>();
+    let (search_info_tx, search_info_rx) = channel::<SearchInfo<M>>();
+    
+    // spawn search thread
+    spawn_search_thread(
+        board_ref_for_search_thread,
+        search_instruction_rx,
+        search_info_tx,
+        stop_rx,
+        search
+    );
+
+    loop {
+
+        // read command from stdin
+        let command = &mut String::new();
+        stdin.read_line(command)?;
+
+        // parse & handle command
+        parse_and_handle_uci_command(
+            command,
+            Arc::clone(&board_ref),
+            &search_instruction_tx,
+            &stop_tx,
+            &search_info_rx
+        );
+
+    }
+
 }

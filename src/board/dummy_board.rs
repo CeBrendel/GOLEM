@@ -1,10 +1,10 @@
 
 use crate::board::traits::{Move, Board};
 
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DummyMove{in_algebraic: String}
 
+#[derive(Default)]
 pub struct DummyBoard{
     pub fen_like_base_position: String,  // either "startpos" or a FEN
     pub pushed_moves: Vec<DummyMove>
