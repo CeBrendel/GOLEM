@@ -11,46 +11,48 @@ use std::{thread, thread::JoinHandle};
 use std::sync::{Arc, Mutex};
 
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct SearchInstruction {
     // TODO: ponder, nodes, mate
-    searchmoves: Option<Vec<String>>,
-    wtime_in_ms: Option<usize>,
-    btime_in_ms: Option<usize>,
-    winc_in_ms: Option<usize>,
-    binc_in_ms: Option<usize>,
-    movestogo: Option<usize>,
-    depth: Option<usize>,
-    movetime_in_ms: Option<usize>,
-    infinite: bool
+    pub searchmoves: Option<Vec<String>>,
+    pub wtime_in_ms: Option<usize>,
+    pub btime_in_ms: Option<usize>,
+    pub winc_in_ms: Option<usize>,
+    pub binc_in_ms: Option<usize>,
+    pub movestogo: Option<usize>,
+    pub depth: Option<usize>,
+    pub movetime_in_ms: Option<usize>,
+    pub infinite: bool
 }
 
 type Search<M, B> = fn(&mut B, SearchInstruction, &Receiver<bool>, &Sender<SearchInfo<M>>) -> ();
 
-impl SearchInstruction {
-    pub fn visualize(&self) {
+impl std::fmt::Debug for SearchInstruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 
         // for easier optional printing
-        macro_rules! maybe_println {
+        macro_rules! maybe_write {
             ($description: expr, $option: expr) => {
                 match $option {
                     Option::None     => {},
-                    Option::Some(t) => println!($description, t)
+                    Option::Some(t) => writeln!(f, $description, t)?
                 }
             };
         }
 
-        println!("\nSearchIncstructions:");
-        maybe_println!("searchmoves: {:?}", &self.searchmoves);
-        maybe_println!("   infinite: {}", Option::Some(self.infinite));
-        maybe_println!("      depth: {}", self.depth);
-        maybe_println!("   movetime: {}", self.movetime_in_ms);
-        maybe_println!("      wtime: {}", self.wtime_in_ms);
-        maybe_println!("      btime: {}", self.btime_in_ms);
-        maybe_println!("       winc: {}", self.winc_in_ms);
-        maybe_println!("       binc: {}", self.binc_in_ms);
-        maybe_println!("  movestogo: {}", self.movestogo);
+        println!("\nSearchInstructions:");
+        maybe_write!("searchmoves: {:?}", &self.searchmoves);
+        maybe_write!("   infinite: {}", Option::Some(self.infinite));
+        maybe_write!("      depth: {}", self.depth);
+        maybe_write!("   movetime: {}", self.movetime_in_ms);
+        maybe_write!("      wtime: {}", self.wtime_in_ms);
+        maybe_write!("      btime: {}", self.btime_in_ms);
+        maybe_write!("       winc: {}", self.winc_in_ms);
+        maybe_write!("       binc: {}", self.binc_in_ms);
+        maybe_write!("  movestogo: {}", self.movestogo);
         println!();
+
+        return Ok(());
         
     }
 }
@@ -225,7 +227,7 @@ fn handle_go(s: &str, search_instruction_tx: &Sender<SearchInstruction>) {
         }
     };
 
-    search_instructions.visualize();
+    println!("{:?}", search_instructions);
 
     // send search instruction to search thread
     search_instruction_tx.send(search_instructions);
@@ -296,10 +298,13 @@ fn spawn_search_thread<M: Move, B: Board<M>>(
                 Option::None                     => thread::sleep(retry_duration),
                 Option::Some(search_instruction) => {
                     
-                    // acquire lock of board and do the search (and listen for stop signals)
+                    // acquire lock of board
                     let mut locked_board = board.lock().expect("Acquiring of lock failed. Mutex is probably poisoned!");
                     
-                    // dummy search
+                    // clear stop signal is there is any
+                    let _ = stop_rx.recv();
+
+                    // do the search
                     search(&mut locked_board, search_instruction, &stop_rx, &search_info_tx);
                 }
             }

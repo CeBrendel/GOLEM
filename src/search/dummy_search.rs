@@ -8,15 +8,15 @@ use std::thread;
 
 pub fn dummy_search<M: Move, B: Board<M>>(
     _locked_board: &mut B,
-    _search_instruction: SearchInstruction,
+    search_instruction: SearchInstruction,
     stop_rx: &Receiver<bool>,
     search_info_tx: &Sender<SearchInfo<M>>
 ) {
     
     let mut pv: Vec<M> = Vec::new();
     let mut bestmove: M;
-    let mut counter: usize = 2;
-    let wait_duration = std::time::Duration::from_millis(3000);
+    let mut counter = 1;
+    let wait_duration = std::time::Duration::from_millis(200);
     let mut stopped: bool = false;
     loop {
 
@@ -32,7 +32,7 @@ pub fn dummy_search<M: Move, B: Board<M>>(
 
 
             // wait a bit
-            thread::sleep(wait_duration/100);
+            thread::sleep(wait_duration/100 * counter);
 
             // break inner loop after 100 waits
             inner_counter += 1;
@@ -45,7 +45,7 @@ pub fn dummy_search<M: Move, B: Board<M>>(
         if stopped {break}
 
         // make fake search info
-        let bestmove_str = String::from("e2e") + counter.to_string().as_str();
+        let bestmove_str = String::from("e2e") + (counter + 1).to_string().as_str();
         println!("  >> search-thread: bestmove {} at depth {}", bestmove_str, counter);
         counter += 1;
         let bestmove = M::from_algebraic(&bestmove_str);
@@ -57,6 +57,12 @@ pub fn dummy_search<M: Move, B: Board<M>>(
 
         // send current search info
         search_info_tx.send(search_info);
+
+        // maybe break search at the right depth
+        match search_instruction.depth {
+            Option::None => (),
+            Option::Some(depth) => if counter >= ((depth + 1) as u32) {break}
+        }
 
     }
 }

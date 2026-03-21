@@ -35,7 +35,12 @@ impl Board<DummyMove> for DummyBoard{
         self.pushed_moves.pop();
     }
     fn visualize(&self) {
-        let pushed_moves = self.pushed_moves.iter().map(|r#move| r#move.as_str()).collect::<Vec<&str>>().join(" ");
-        println!("Board state:\n  Base position: {}\n  Pushed moves:  {}\n", self.fen_like_base_position, pushed_moves);
+        println!("Board state:");
+        println!("  Base position: {}", self.fen_like_base_position);
+        let pushed_moves = self.pushed_moves.iter().map(|r#move| r#move.as_str()).collect::<Vec<&str>>();
+        if pushed_moves.len() > 0 {
+            println!("  Pushed moves:  {}", pushed_moves.join(" "));
+        }
+        println!();
     }
 }
