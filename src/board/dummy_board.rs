@@ -1,5 +1,5 @@
 
-use crate::board::traits::{Move, Board};
+use crate::board::{Move, Board};
 
 #[derive(Debug, Clone)]
 pub struct DummyMove{in_algebraic: String}

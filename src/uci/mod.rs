@@ -1,70 +1,43 @@
 
-pub mod channeling;
+mod text_parsing;
 
-use crate::board::traits::{Move, Board};
-use crate::search::SearchInfo;
-use crate::uci::channeling::{channel, Sender, Receiver};
+use crate::board::{Move, Board};
+use crate::search::{SearchInstruction, SearchInfo, SearchResult, Search};
+use crate::channeling::{channel, Sender, Receiver};
+use crate::uci::text_parsing::{pop_first, parse_next_block_as_usize, collect_blocks_until_next_keyword_or_end};
 
-use std::str::SplitWhitespace;
-use std::iter::Peekable;
+use std::sync::mpsc::{channel as queueing_channel, Sender as QueueingSender, Receiver as QueueingReceiver};
+
 use std::{thread, thread::JoinHandle};
 use std::sync::{Arc, Mutex};
 
 
-#[derive(Default, Clone)]
-pub struct SearchInstruction {
-    // TODO: ponder, nodes, mate
-    pub searchmoves: Option<Vec<String>>,
-    pub wtime_in_ms: Option<usize>,
-    pub btime_in_ms: Option<usize>,
-    pub winc_in_ms: Option<usize>,
-    pub binc_in_ms: Option<usize>,
-    pub movestogo: Option<usize>,
-    pub depth: Option<usize>,
-    pub movetime_in_ms: Option<usize>,
-    pub infinite: bool
+#[derive(Clone)]
+pub enum Response<M: Move> {
+    // todo: option, copyprotection?
+    UciResponse,
+    ReadyOk,
+    Info(SearchInfo<M>),
+    Bestmove(SearchResult<M>)
 }
 
-type Search<M, B> = fn(&mut B, SearchInstruction, &Receiver<bool>, &Sender<SearchInfo<M>>) -> ();
-
-impl std::fmt::Debug for SearchInstruction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-
-        // for easier optional printing
-        macro_rules! maybe_write {
-            ($description: expr, $option: expr) => {
-                match $option {
-                    Option::None     => {},
-                    Option::Some(t) => writeln!(f, $description, t)?
-                }
-            };
-        }
-
-        println!("\nSearchInstructions:");
-        maybe_write!("searchmoves: {:?}", &self.searchmoves);
-        maybe_write!("   infinite: {}", Option::Some(self.infinite));
-        maybe_write!("      depth: {}", self.depth);
-        maybe_write!("   movetime: {}", self.movetime_in_ms);
-        maybe_write!("      wtime: {}", self.wtime_in_ms);
-        maybe_write!("      btime: {}", self.btime_in_ms);
-        maybe_write!("       winc: {}", self.winc_in_ms);
-        maybe_write!("       binc: {}", self.binc_in_ms);
-        maybe_write!("  movestogo: {}", self.movestogo);
-        println!();
-
-        return Ok(());
-        
-    }
+fn emit_request_for_uci_response<M: Move>(write_request_tx: &QueueingSender<Response<M>>) {
+    write_request_tx.send(Response::UciResponse).expect("Sending instruction failed!")
 }
 
-fn pop_first(s: &str) -> (&str, &str) {
-    return match s.split_once(char::is_whitespace) {
-        Option::None                     => (s, ""),
-        Option::Some((h, t)) => (h, t)
-    };
+fn emit_request_for_readyok<M: Move>(write_request_tx: &QueueingSender<Response<M>>) {
+    write_request_tx.send(Response::ReadyOk).expect("Sending instruction failed!")
 }
 
-fn handle_uci() {
+fn emit_quit_signal(quit_tx: &QueueingSender<()>) {
+    quit_tx.send(()).expect("Quit signal could not be sent!")
+}
+
+fn emit_stop_signal(stop_tx: &Sender<()>) {
+    stop_tx.send(())
+}
+
+fn emit_uci_response() {
     // TODO: Show options!
     println!("id name גֹלֶם (GOLEM)");
     println!("id author Cedric Brendel");
@@ -72,14 +45,47 @@ fn handle_uci() {
     println!("");
 }
 
-fn handle_isready() {
+fn emit_readyok() {
     println!("readyok");
     println!("");
 }
 
-fn handle_quit() {
-    // TODO: This is not what we want! E. g. print bestmove.
-    std::process::exit(0)
+fn emit_search_info<M: Move>(search_info: SearchInfo<M>) {
+    
+    let mut s = String::from("info");
+
+    // turn score into a string
+    let score = match &search_info.score {
+        Option::None                => Option::None,
+        Option::Some(score) => Option::Some(score.as_str())
+    };
+
+    let pv_line: Option<String> = match &search_info.principal_variation_line {
+        Option::None             => Option::None,
+        Option::Some(v) => Option::Some(v.iter().map(|r#move| r#move.as_str()).collect::<Vec<_>>().join(" "))
+    };
+
+    macro_rules! maybe_append {
+        ($description: expr, $option: expr) => {
+            match $option {
+                Option::None    => {},
+                Option::Some(t) => {s += &format!($description, t)}
+            }
+        };
+    }
+
+    maybe_append!(" depth {}", search_info.depth);
+    maybe_append!(" time {}", search_info.time);
+    maybe_append!(" nodes {}", search_info.nodes);
+    maybe_append!(" score {}", score);
+    maybe_append!(" pv {}", pv_line);
+
+    println!("{}", s);
+
+}
+
+fn emit_search_result<M: Move>(search_result: SearchResult<M>) {
+    println!("bestmove {}\n", search_result.bestmove.as_str());
 }
 
 fn handle_position<M: Move, B: Board<M>>(s: &str, board: Arc<Mutex<B>>) {
@@ -89,7 +95,7 @@ fn handle_position<M: Move, B: Board<M>>(s: &str, board: Arc<Mutex<B>>) {
 
     // split at "moves" (if it occurs) to obtain infromation for base position and moves
     let (maybe_fen_with_fen_keyword, maybe_moves) = match tail.find("moves") {
-        Option::None      => (tail, Option::None),
+        Option::None             => (tail, Option::None),
         Option::Some(idx) => (&tail[..idx], Option::Some(&tail[idx+5..]))
     };
 
@@ -125,48 +131,7 @@ fn handle_position<M: Move, B: Board<M>>(s: &str, board: Arc<Mutex<B>>) {
 
 }
 
-fn parse_next_block_as_usize(blocks: &mut Peekable<SplitWhitespace>) -> usize {
-    match blocks.next() {
-        Option::None                => panic!("No block found!"),
-        Option::Some(number_as_str) => number_as_str.parse::<usize>().expect("Could not parse to usize!")
-    }
-}
-
-fn collect_blocks_until_next_keyword_or_end(blocks: &mut Peekable<SplitWhitespace>) -> Vec<String> {
-
-    // make vector for collecting blocks
-    let mut collected_blocks = Vec::new();
-
-    // loop through blocks; use peeking to not unnecessarily advance "blocks" iterator
-    loop {
-
-        // peek into next block. If there is none or if it is a keyword we are done collecting, otherwise collect
-        match blocks.peek() {
-            Option::None        => {break;},
-            Option::Some(&block) => {
-                match block {
-                    "searchmoves" | "ponder" | "wtime" | "btime"
-                    | "winc" | "binc" | "movestogo" | "depth"
-                    | "nodes" | "mate" | "movetime" | "infinite"    => {break;},
-                    _                                               => {
-
-                        // advance original iterator
-                        // unwrapping is ok, because the Option::None case wa shandled while peeking
-                        let block = blocks.next().unwrap();
-
-                        // remember block
-                        collected_blocks.push(block.to_owned());
-
-                    }
-                }
-            }
-        }
-    }
-
-    return collected_blocks;
-}
-
-fn handle_go(s: &str, search_instruction_tx: &Sender<SearchInstruction>) {
+fn handle_go(s: &str, search_instruction_tx: &QueueingSender<SearchInstruction>) {
 
     // make empty SearchInstruction
     let mut search_instructions = SearchInstruction::default();
@@ -176,86 +141,57 @@ fn handle_go(s: &str, search_instruction_tx: &Sender<SearchInstruction>) {
     let mut blocks = s.split_whitespace().peekable();
     loop {
 
+        // for more succinct parsing of numbers
+        macro_rules! write_field {
+            ($field: ident) => {
+                {
+                    let value = parse_next_block_as_usize(&mut blocks);
+                    search_instructions.$field = Option::Some(value);
+                }
+            };
+        }
+
         // get next block and parse it
         match blocks.next() {
             Option::None          => {break;}
             Option::Some(keyword) => {
 
                 match keyword {
+                    "wtime"       => write_field!(wtime_in_ms),
+                    "btime"       => write_field!(btime_in_ms),
+                    "winc"        => write_field!(winc_in_ms),
+                    "binc"        => write_field!(binc_in_ms),
+                    "movestogo"   => write_field!(movestogo),
+                    "depth"       => write_field!(depth),
+                    "movetime"    => write_field!(movetime_in_ms),
+                    "infinite"    => {search_instructions.infinite = true;},
                     "searchmoves" => {
                         let collected_blocks = collect_blocks_until_next_keyword_or_end(&mut blocks);
                         search_instructions.searchmoves = Option::Some(collected_blocks);
                     },
-                    "ponder"      => todo!("Engine currently does not support pondering!"),
-                    "wtime"       => {
-                        let wtime_in_ms = parse_next_block_as_usize(&mut blocks);
-                        search_instructions.wtime_in_ms = Option::Some(wtime_in_ms);
-                    },
-                    "btime"       => {
-                        let btime_in_ms = parse_next_block_as_usize(&mut blocks);
-                        search_instructions.btime_in_ms = Option::Some(btime_in_ms);
-                    },
-                    "winc"        => {
-                        let winc_in_ms = parse_next_block_as_usize(&mut blocks);
-                        search_instructions.winc_in_ms = Option::Some(winc_in_ms);
-                    },
-                    "binc"        => {
-                        let binc_in_ms = parse_next_block_as_usize(&mut blocks);
-                        search_instructions.binc_in_ms = Option::Some(binc_in_ms);
-                    },
-                    "movestogo"   => {
-                        let movestogo = parse_next_block_as_usize(&mut blocks);
-                        search_instructions.movestogo = Option::Some(movestogo);
-                    },
-                    "depth"       => {
-                        let depth = parse_next_block_as_usize(&mut blocks);
-                        search_instructions.depth = Option::Some(depth);
-                    },
+
                     "nodes"       => todo!("Engine currently does not support only searching a fixed number of nodes."),
                     "mate"        => todo!("Engine currently does not support mate search."),
-                    "movetime"    => {
-                        let movetime_in_ms = parse_next_block_as_usize(&mut blocks);
-                        search_instructions.movetime_in_ms = Option::Some(movetime_in_ms);
-                    },
-                    "infinite"    => {search_instructions.infinite = true;},
-                    _             => {
-                        println!("Keyword: {}, Remaining blocks: {:?}", keyword, blocks);
-                        panic!("Received invalid \"go\" command!");
-                    }
+                    "ponder"      => todo!("Engine currently does not support pondering!"),
+
+                    _             => panic!("Received invalid \"go\" command! Keyword: {}, Remaining blocks: {:?}", keyword, blocks)
                 }
             }
         }
     };
 
-    println!("{:?}", search_instructions);
-
     // send search instruction to search thread
-    search_instruction_tx.send(search_instructions);
-
-}
-
-fn handle_stop<M: Move>(stop_tx: &Sender<bool>, search_info_rx: &Receiver<SearchInfo<M>>) {
-
-    // send stop signal to search thread
-    stop_tx.send(true);
-
-    // emit bestmove
-    let search_info = match search_info_rx.recv() {
-        Option::None                => panic!("No search info was supplied by the search thread!"),
-        Option::Some(search_info)   => search_info
-    };
-    let bestmove = search_info.r#move.expect("Search did not return a move!");
-    let bestmove_str = bestmove.as_str();
-    println!("bestmove {}\n", bestmove_str);
+    search_instruction_tx.send(search_instructions).expect("Sending failed!");
 
 }
 
 fn parse_and_handle_uci_command<M: Move, B: Board<M>>(
     command: &str,
     board: Arc<Mutex<B>>,
-    search_instruction_tx: &Sender<SearchInstruction>,
-    stop_tx: &Sender<bool>,
-    search_info_rx: &Receiver<SearchInfo<M>>
+    search_instruction_tx: &QueueingSender<SearchInstruction>,
+    stop_tx: &Sender<()>,
+    write_request_tx: &QueueingSender<Response<M>>,
+    quit_tx: &QueueingSender<()>
 ) {
 
     // remove linebreaks from command
@@ -265,92 +201,159 @@ fn parse_and_handle_uci_command<M: Move, B: Board<M>>(
     let (keyword, tail) = pop_first(command);
 
     match keyword {
-        "uci"           => handle_uci(),
-        "isready"       => handle_isready(),
-        "position"      => handle_position(tail, board),
-        "go"            => handle_go(tail, search_instruction_tx),
-        "stop"          => handle_stop(stop_tx, search_info_rx),
-        "ucinewgame"    => todo!("Engine does not currently support the \"ucinewgame\" command!"),
-        "ponderhit"     => todo!("Engine does not currently support pondering!"),
-        "setoption"     => todo!(),
-        "quit"          => handle_quit(),
-        _               => panic!("Unrecognized command!")
+        "uci"        => emit_request_for_uci_response(write_request_tx),
+        "isready"    => emit_request_for_readyok(write_request_tx),
+        "position"   => handle_position(tail, board),
+        "go"         => handle_go(tail, search_instruction_tx),
+        "stop"       => emit_stop_signal(stop_tx),
+        "ucinewgame" => todo!("Engine does not currently support the \"ucinewgame\" command!"),
+        "ponderhit"  => todo!("Engine does not currently support pondering!"),
+        "setoption"  => todo!(),
+        "quit"       => emit_quit_signal(quit_tx),
+        _            => ()  // simply ignore unrecognized keywords
     }
+}
+
+fn spawn_parsing_thread<M: Move, B: Board<M>>(
+    board_ref: Arc<Mutex<B>>,
+    search_instruction_tx: QueueingSender<SearchInstruction>,
+    write_request_tx: QueueingSender<Response<M>>,
+    stop_tx: Sender<()>,
+    quit_tx: QueueingSender<()>
+) -> JoinHandle<()> {
+    return thread::spawn(move || {
+
+        // this thread is the only thread that listens and writes to stdin/stdout
+        let stdin = std::io::stdin();
+
+        loop {
+
+            // read command from stdin
+            let command = &mut String::new();
+            match stdin.read_line(command) {
+                Err(_) => continue,  // if reading failed, simply ignore and continue
+                Ok(_)  => ()
+            };
+
+            // parse & handle command
+            parse_and_handle_uci_command(
+                command,
+                Arc::clone(&board_ref),
+                &search_instruction_tx,
+                &stop_tx,
+                &write_request_tx,
+                &quit_tx
+            );
+
+        }
+
+    });
+}
+
+fn spawn_stdout_writer<M: Move>(
+    write_request_rx: QueueingReceiver<Response<M>>
+) -> JoinHandle<()> {
+    return thread::spawn(move || {
+        
+        // repeatedly listen for messages in the channel
+        loop {
+
+            // wait for message to come through
+            let message = match write_request_rx.recv() {
+                Err(_)                   => panic!("Write request channel is hung up!"),
+                Ok(message) => message
+            };
+
+            // handle message
+            match message {
+                Response::<M>::UciResponse                  => emit_uci_response(),
+                Response::<M>::ReadyOk                      => emit_readyok(),
+                Response::<M>::Info(info)    => emit_search_info(info),
+                Response::Bestmove(result) => emit_search_result(result),
+            }
+
+        }
+
+    });
 }
 
 fn spawn_search_thread<M: Move, B: Board<M>>(
     board: Arc<Mutex<B>>,
-    search_instruction_rx: Receiver<SearchInstruction>,
-    search_info_tx: Sender<SearchInfo<M>>,
-    stop_rx: Receiver<bool>,
+    search_instruction_rx: QueueingReceiver<SearchInstruction>,
+    stop_rx: Receiver<()>,
+    write_request_tx: QueueingSender<Response<M>>,
     search: Search<M, B>
 ) -> JoinHandle<()> {
     return thread::spawn(move || {
 
-        // duration between successive queries of the search_info channel for instructions
-        // TODO: This should be a static somewhere or live in some config
-        let retry_duration = std::time::Duration::from_millis(10);
-
+        // repeatedly listen for search instructions
         loop {
             
             // listen for instructions
-            match search_instruction_rx.recv() {
-                Option::None                     => thread::sleep(retry_duration),
-                Option::Some(search_instruction) => {
+            let search_instructions = match search_instruction_rx.recv() {
+                Err(_)                              => panic!("Search instruction channel is hung up!"),
+                Ok(instructions) => instructions
+            };
                     
-                    // acquire lock of board
-                    let mut locked_board = board.lock().expect("Acquiring of lock failed. Mutex is probably poisoned!");
-                    
-                    // clear stop signal is there is any
-                    let _ = stop_rx.recv();
+            // acquire lock of board
+            let mut locked_board = board.lock().expect("Acquiring of lock failed. Mutex is probably poisoned!");
+            
+            // clear stop signal is there is any
+            let _ = stop_rx.recv();
 
-                    // do the search
-                    search(&mut locked_board, search_instruction, &stop_rx, &search_info_tx);
-                }
-            }
+            // do the search
+            let result = search(&mut locked_board, search_instructions, &stop_rx, &write_request_tx);
+        
+            // send the result
+            write_request_tx.send(Response::Bestmove(result)).expect("Sending of search result failed!");
+
         }
+
     });
 }
 
-pub fn uci_loop<M: Move, B: Board<M>>(search: Search<M, B>) -> std::io::Result<()> where B: Default {
-
-    // main thread owns stdin and is the only thread to write to it
-    let stdin = std::io::stdin();
+pub fn uci_loop<M: Move, B: Board<M>>(search: Search<M, B>) where B: Default {
 
     // make a new board and wrap it in a Arc-Mutex, so that both threads can modify it
     let board = B::default();
-    let board_ref = Arc::new(Mutex::new(board));
-    let board_ref_for_search_thread = Arc::clone(&board_ref);
+    let board_ref_for_parsing_thread = Arc::new(Mutex::new(board));
+    let board_ref_for_search_thread = Arc::clone(&board_ref_for_parsing_thread);
 
     // channels for communicating between the main and the search thread
-    let (search_instruction_tx, search_instruction_rx) = channel::<SearchInstruction>();
-    let (stop_tx, stop_rx) = channel::<bool>();
-    let (search_info_tx, search_info_rx) = channel::<SearchInfo<M>>();
-    
+    let (search_instruction_tx, search_instruction_rx) = queueing_channel::<SearchInstruction>();
+    let (stop_tx, stop_rx) = channel::<()>();
+    let (quit_tx, quit_rx) = queueing_channel::<()>();
+    let (write_request_tx, write_request_rx) = queueing_channel::<Response<M>>();
+
+    // make multiple Senders for the write request channel
+    let write_request_tx_for_parsing_thread = write_request_tx.clone();
+    let write_request_tx_for_search_thread = write_request_tx;
+
+    // spawn thread for reading stdin and parsing commands
+    spawn_parsing_thread(
+        board_ref_for_parsing_thread, 
+        search_instruction_tx,
+        write_request_tx_for_parsing_thread,
+        stop_tx,
+        quit_tx
+    );
+
+    // spawn thread for reading stdout
+    spawn_stdout_writer(write_request_rx);
+
     // spawn search thread
     spawn_search_thread(
         board_ref_for_search_thread,
         search_instruction_rx,
-        search_info_tx,
         stop_rx,
+        write_request_tx_for_search_thread,
         search
     );
 
-    loop {
-
-        // read command from stdin
-        let command = &mut String::new();
-        stdin.read_line(command)?;
-
-        // parse & handle command
-        parse_and_handle_uci_command(
-            command,
-            Arc::clone(&board_ref),
-            &search_instruction_tx,
-            &stop_tx,
-            &search_info_rx
-        );
-
+    // wait for signal to quit
+    match quit_rx.recv() {
+        Err(_) => panic!("Quit channel is hung up!"),
+        Ok(_)  => std::process::exit(0)
     }
 
 }
