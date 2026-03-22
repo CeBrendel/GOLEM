@@ -3,13 +3,10 @@ mod text_parsing;
 
 use crate::board::{Move, Board};
 use crate::search::{SearchInstruction, SearchInfo, SearchResult, Search};
-use crate::channeling::{channel, Sender, Receiver};
 use crate::uci::text_parsing::{pop_first, parse_next_block_as_usize, collect_blocks_until_next_keyword_or_end};
 
-use std::sync::mpsc::{channel as queueing_channel, Sender as QueueingSender, Receiver as QueueingReceiver};
-
 use std::{thread, thread::JoinHandle};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc::{channel, Sender, Receiver}};
 
 
 #[derive(Clone)]
@@ -21,20 +18,29 @@ pub enum Response<M: Move> {
     Bestmove(SearchResult<M>)
 }
 
-fn emit_request_for_uci_response<M: Move>(write_request_tx: &QueueingSender<Response<M>>) {
+fn clear_channel<T>(receiver: &Receiver<T>) {
+    loop {
+        match receiver.try_recv() {
+            Err(_) => break,  // nothing in the channel: break
+            Ok(_)  => {}  // something in the channel: do another iteration of try_recv
+        }
+    }
+}
+
+fn emit_request_for_uci_response<M: Move>(write_request_tx: &Sender<Response<M>>) {
     write_request_tx.send(Response::UciResponse).expect("Sending instruction failed!")
 }
 
-fn emit_request_for_readyok<M: Move>(write_request_tx: &QueueingSender<Response<M>>) {
+fn emit_request_for_readyok<M: Move>(write_request_tx: &Sender<Response<M>>) {
     write_request_tx.send(Response::ReadyOk).expect("Sending instruction failed!")
 }
 
-fn emit_quit_signal(quit_tx: &QueueingSender<()>) {
+fn emit_quit_signal(quit_tx: &Sender<()>) {
     quit_tx.send(()).expect("Quit signal could not be sent!")
 }
 
 fn emit_stop_signal(stop_tx: &Sender<()>) {
-    stop_tx.send(())
+    stop_tx.send(()).expect("Stop signal could not be sent!")
 }
 
 fn emit_uci_response() {
@@ -131,7 +137,7 @@ fn handle_position<M: Move, B: Board<M>>(s: &str, board: Arc<Mutex<B>>) {
 
 }
 
-fn handle_go(s: &str, search_instruction_tx: &QueueingSender<SearchInstruction>) {
+fn handle_go(s: &str, search_instruction_tx: &Sender<SearchInstruction>) {
 
     // make empty SearchInstruction
     let mut search_instructions = SearchInstruction::default();
@@ -188,10 +194,10 @@ fn handle_go(s: &str, search_instruction_tx: &QueueingSender<SearchInstruction>)
 fn parse_and_handle_uci_command<M: Move, B: Board<M>>(
     command: &str,
     board: Arc<Mutex<B>>,
-    search_instruction_tx: &QueueingSender<SearchInstruction>,
+    search_instruction_tx: &Sender<SearchInstruction>,
     stop_tx: &Sender<()>,
-    write_request_tx: &QueueingSender<Response<M>>,
-    quit_tx: &QueueingSender<()>
+    write_request_tx: &Sender<Response<M>>,
+    quit_tx: &Sender<()>
 ) {
 
     // remove linebreaks from command
@@ -216,10 +222,10 @@ fn parse_and_handle_uci_command<M: Move, B: Board<M>>(
 
 fn spawn_parsing_thread<M: Move, B: Board<M>>(
     board_ref: Arc<Mutex<B>>,
-    search_instruction_tx: QueueingSender<SearchInstruction>,
-    write_request_tx: QueueingSender<Response<M>>,
+    search_instruction_tx: Sender<SearchInstruction>,
+    write_request_tx: Sender<Response<M>>,
     stop_tx: Sender<()>,
-    quit_tx: QueueingSender<()>
+    quit_tx: Sender<()>
 ) -> JoinHandle<()> {
     return thread::spawn(move || {
 
@@ -251,7 +257,7 @@ fn spawn_parsing_thread<M: Move, B: Board<M>>(
 }
 
 fn spawn_stdout_writer<M: Move>(
-    write_request_rx: QueueingReceiver<Response<M>>
+    write_request_rx: Receiver<Response<M>>
 ) -> JoinHandle<()> {
     return thread::spawn(move || {
         
@@ -279,9 +285,9 @@ fn spawn_stdout_writer<M: Move>(
 
 fn spawn_search_thread<M: Move, B: Board<M>>(
     board: Arc<Mutex<B>>,
-    search_instruction_rx: QueueingReceiver<SearchInstruction>,
+    search_instruction_rx: Receiver<SearchInstruction>,
     stop_rx: Receiver<()>,
-    write_request_tx: QueueingSender<Response<M>>,
+    write_request_tx: Sender<Response<M>>,
     search: Search<M, B>
 ) -> JoinHandle<()> {
     return thread::spawn(move || {
@@ -299,7 +305,7 @@ fn spawn_search_thread<M: Move, B: Board<M>>(
             let mut locked_board = board.lock().expect("Acquiring of lock failed. Mutex is probably poisoned!");
             
             // clear stop signal is there is any
-            let _ = stop_rx.recv();
+            clear_channel(&stop_rx);
 
             // do the search
             let result = search(&mut locked_board, search_instructions, &stop_rx, &write_request_tx);
@@ -320,10 +326,10 @@ pub fn uci_loop<M: Move, B: Board<M>>(search: Search<M, B>) where B: Default {
     let board_ref_for_search_thread = Arc::clone(&board_ref_for_parsing_thread);
 
     // channels for communicating between the main and the search thread
-    let (search_instruction_tx, search_instruction_rx) = queueing_channel::<SearchInstruction>();
+    let (search_instruction_tx, search_instruction_rx) = channel::<SearchInstruction>();
     let (stop_tx, stop_rx) = channel::<()>();
-    let (quit_tx, quit_rx) = queueing_channel::<()>();
-    let (write_request_tx, write_request_rx) = queueing_channel::<Response<M>>();
+    let (quit_tx, quit_rx) = channel::<()>();
+    let (write_request_tx, write_request_rx) = channel::<Response<M>>();
 
     // make multiple Senders for the write request channel
     let write_request_tx_for_parsing_thread = write_request_tx.clone();

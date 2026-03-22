@@ -2,11 +2,10 @@
 pub mod dummy_search;
 
 use std::fmt;
+use std::sync::mpsc::{Sender, Receiver};
 
 use crate::board::Move;
 use crate::uci::Response;
-use crate::channeling::Receiver;
-use std::sync::mpsc::{Sender as QueueingSender};
 
 
 #[derive(Default, Clone)]
@@ -55,7 +54,7 @@ pub struct SearchResult<M :Move> {
     pub bestmove: M
 }
 
-pub type Search<M, B> = fn(&mut B, SearchInstruction, &Receiver<()>, &QueueingSender<Response<M>>) -> SearchResult<M>;
+pub type Search<M, B> = fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M>>) -> SearchResult<M>;
 
 // for easier optional printing/formatting
 macro_rules! maybe_write {

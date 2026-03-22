@@ -2,7 +2,6 @@
 use std::str::SplitWhitespace;
 use std::iter::Peekable;
 
-
 pub fn pop_first(s: &str) -> (&str, &str) {
     return match s.split_once(char::is_whitespace) {
         Option::None                     => (s, ""),

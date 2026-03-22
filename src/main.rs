@@ -3,7 +3,6 @@
 #![allow(unused_variables)]
 
 pub mod board;
-pub mod channeling;
 pub mod search;
 pub mod uci;
 

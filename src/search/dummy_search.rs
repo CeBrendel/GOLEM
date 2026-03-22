@@ -1,19 +1,16 @@
 
 use crate::board::{Move, Board};
 use crate::search::{SearchInstruction, SearchInfo, SearchResult};
-use crate::channeling::Receiver;
 use crate::uci::Response;
 
-use std::sync::mpsc::{Sender as QueueingSender};
-
+use std::sync::mpsc::{Sender, Receiver};
 use std::thread;
-
 
 pub fn dummy_search<M: Move, B: Board<M>>(
     _locked_board: &mut B,
     search_instruction: SearchInstruction,
     stop_rx: &Receiver<()>,
-    write_request_tx: &QueueingSender<Response<M>>
+    write_request_tx: &Sender<Response<M>>
 ) -> SearchResult<M> {
     
     let mut pv: Vec<M> = Vec::new();
@@ -29,9 +26,9 @@ pub fn dummy_search<M: Move, B: Board<M>>(
         loop {
 
             // check if search should be stopped
-            match stop_rx.recv() {
-                Option::None    => (),
-                Option::Some(_) => {stopped = true; break}
+            match stop_rx.try_recv() {
+                Err(_) => (),  // no stop signal was supplied
+                Ok(_)  => {stopped = true; break}
             }
 
 
@@ -50,7 +47,6 @@ pub fn dummy_search<M: Move, B: Board<M>>(
 
         // make fake search info
         let bestmove_str = String::from("e2e") + (counter + 1).to_string().as_str();
-        counter += 1;
         bestmove = M::from_algebraic(&bestmove_str);
         pv.push(bestmove.clone());
         let search_info = SearchInfo {
@@ -60,10 +56,11 @@ pub fn dummy_search<M: Move, B: Board<M>>(
             time: Option::None,
             principal_variation_line: Option::Some(pv.clone()),
         };
-
+        counter += 1;
+        
         // send current search info
         write_request_tx.send(Response::Info(search_info)).expect("Sending of search info failed!");
-
+        
         // maybe break search at the right depth
         match search_instruction.depth {
             Option::None               => (),
