@@ -1,9 +1,10 @@
 
 pub mod dummy_board;
+pub mod wrapped_board;
 
 
 pub trait Move: Clone + Send + Sync + 'static {
-    fn as_str(&self) -> &str;
+    fn as_string(&self) -> String;
     fn from_algebraic(s: &str) -> Self;
 }
 

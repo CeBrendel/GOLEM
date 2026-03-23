@@ -98,7 +98,7 @@ impl<M: Move> fmt::Debug for SearchInfo<M> {
         // concat PV line into a single String (if there is any)
         let pv_line: Option<String> = match &self.principal_variation_line {
             Option::None => Option::None,
-            Option::Some(v) => Option::Some(v.iter().map(|r#move| r#move.as_str()).collect::<Vec<_>>().join(" "))
+            Option::Some(v) => Option::Some(v.iter().map(|r#move| r#move.as_string()).collect::<Vec<_>>().join(" "))
         };
 
         println!("\nSearchInfo:");
@@ -118,7 +118,7 @@ impl<M: Move> fmt::Debug for SearchResult<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 
         println!("\nSearchResult:");
-        writeln!(f, "bestmove: {}", self.bestmove.as_str())?;
+        writeln!(f, "bestmove: {}", self.bestmove.as_string())?;
         println!();
 
         return Ok(());

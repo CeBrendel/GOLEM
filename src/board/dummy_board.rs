@@ -11,8 +11,8 @@ pub struct DummyBoard{
 }
 
 impl Move for DummyMove{
-    fn as_str(&self) -> &str {
-        return &self.in_algebraic;
+    fn as_string(&self) -> String {
+        return self.in_algebraic.clone();
     }
     fn from_algebraic(s: &str) -> Self {
         Self{in_algebraic: s.to_owned()}
@@ -37,7 +37,7 @@ impl Board<DummyMove> for DummyBoard{
     fn visualize(&self) {
         println!("Board state:");
         println!("  Base position: {}", self.fen_like_base_position);
-        let pushed_moves = self.pushed_moves.iter().map(|r#move| r#move.as_str()).collect::<Vec<&str>>();
+        let pushed_moves = self.pushed_moves.iter().map(|r#move| r#move.as_string()).collect::<Vec<String>>();
         if pushed_moves.len() > 0 {
             println!("  Pushed moves:  {}", pushed_moves.join(" "));
         }

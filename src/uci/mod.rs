@@ -68,7 +68,7 @@ fn emit_search_info<M: Move>(search_info: SearchInfo<M>) {
 
     let pv_line: Option<String> = match &search_info.principal_variation_line {
         Option::None             => Option::None,
-        Option::Some(v) => Option::Some(v.iter().map(|r#move| r#move.as_str()).collect::<Vec<_>>().join(" "))
+        Option::Some(v) => Option::Some(v.iter().map(|r#move| r#move.as_string()).collect::<Vec<_>>().join(" "))
     };
 
     macro_rules! maybe_append {
@@ -91,7 +91,7 @@ fn emit_search_info<M: Move>(search_info: SearchInfo<M>) {
 }
 
 fn emit_search_result<M: Move>(search_result: SearchResult<M>) {
-    println!("bestmove {}\n", search_result.bestmove.as_str());
+    println!("bestmove {}\n", search_result.bestmove.as_string());
 }
 
 fn handle_position<M: Move, B: Board<M>>(s: &str, board: Arc<Mutex<B>>) {
@@ -100,9 +100,9 @@ fn handle_position<M: Move, B: Board<M>>(s: &str, board: Arc<Mutex<B>>) {
     let (startpos_or_fen_keyword, tail) = pop_first(s);
 
     // split at "moves" (if it occurs) to obtain infromation for base position and moves
-    let (maybe_fen_with_fen_keyword, maybe_moves) = match tail.find("moves") {
+    let (maybe_fen, maybe_moves) = match tail.find("moves") {
         Option::None             => (tail, Option::None),
-        Option::Some(idx) => (&tail[..idx], Option::Some(&tail[idx+5..]))
+        Option::Some(idx) => (&tail[..idx], Option::Some(&tail[idx+6..]))
     };
 
     // acquire lock of board
@@ -111,16 +111,13 @@ fn handle_position<M: Move, B: Board<M>>(s: &str, board: Arc<Mutex<B>>) {
     // parse startpos and fen keyword
     match startpos_or_fen_keyword {
         "startpos" => board.put_into_startpos(),
-        "fen"      => {
-            let (_, fen) = pop_first(maybe_fen_with_fen_keyword);
-            board.put_into_fen(fen);
-        },
+        "fen"      => board.put_into_fen(maybe_fen),
         _          => panic!("Received invalid \"position\" command!")
     }
 
     // push moves onto board (if there are any)
     match maybe_moves {
-        Option::None        => {},  // do nothing
+        Option::None              => {},  // do nothing
         Option::Some(moves) => {
 
             // split at whitespaces to obtain moves, and make them
