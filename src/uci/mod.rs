@@ -2,19 +2,20 @@
 mod text_parsing;
 
 use crate::board::{Move, Board};
+use crate::search::traits::Value;
 use crate::search::{SearchInstruction, SearchInfo, SearchResult, Search};
-use crate::uci::text_parsing::{pop_first, parse_next_block_as_usize, collect_blocks_until_next_keyword_or_end};
+use crate::uci::text_parsing::{pop_first, parse_next_block_as, collect_blocks_until_next_keyword_or_end};
 
 use std::{thread, thread::JoinHandle};
 use std::sync::{Arc, Mutex, mpsc::{channel, Sender, Receiver}};
 
 
 #[derive(Clone)]
-pub enum Response<M: Move> {
+pub enum Response<M: Move, V: Value> {
     // todo: option, copyprotection?
     UciResponse,
     ReadyOk,
-    Info(SearchInfo<M>),
+    Info(SearchInfo<M, V>),
     Bestmove(SearchResult<M>)
 }
 
@@ -27,11 +28,11 @@ fn clear_channel<T>(receiver: &Receiver<T>) {
     }
 }
 
-fn emit_request_for_uci_response<M: Move>(write_request_tx: &Sender<Response<M>>) {
+fn emit_request_for_uci_response<M: Move, V: Value>(write_request_tx: &Sender<Response<M, V>>) {
     write_request_tx.send(Response::UciResponse).expect("Sending instruction failed!")
 }
 
-fn emit_request_for_readyok<M: Move>(write_request_tx: &Sender<Response<M>>) {
+fn emit_request_for_readyok<M: Move, V: Value>(write_request_tx: &Sender<Response<M, V>>) {
     write_request_tx.send(Response::ReadyOk).expect("Sending instruction failed!")
 }
 
@@ -56,14 +57,14 @@ fn emit_readyok() {
     println!("");
 }
 
-fn emit_search_info<M: Move>(search_info: SearchInfo<M>) {
+fn emit_search_info<M: Move, V: Value>(search_info: SearchInfo<M, V>) {
     
     let mut s = String::from("info");
 
     // turn score into a string
-    let score = match &search_info.score {
-        Option::None                => Option::None,
-        Option::Some(score) => Option::Some(score.as_str())
+    let score = match &search_info.evaluation {
+        Option::None            => Option::None,
+        Option::Some(score) => Option::Some(score.to_string())
     };
 
     let pv_line: Option<String> = match &search_info.principal_variation_line {
@@ -82,7 +83,7 @@ fn emit_search_info<M: Move>(search_info: SearchInfo<M>) {
 
     maybe_append!(" depth {}", search_info.depth);
     maybe_append!(" time {}", search_info.time);
-    maybe_append!(" nodes {}", search_info.nodes);
+    maybe_append!(" nodes {}", Option::Some(search_info.nodes_searched));
     maybe_append!(" score {}", score);
     maybe_append!(" pv {}", pv_line);
 
@@ -123,7 +124,7 @@ fn handle_position<M: Move, B: Board<M>>(s: &str, board: Arc<Mutex<B>>) {
             // split at whitespaces to obtain moves, and make them
             for algebraic_move in moves.split_whitespace() {
                 let r#move = M::from_algebraic(algebraic_move);
-                board.make(r#move);
+                board.make_move(r#move);
             }
 
         }   
@@ -148,7 +149,7 @@ fn handle_go(s: &str, search_instruction_tx: &Sender<SearchInstruction>) {
         macro_rules! write_field {
             ($field: ident) => {
                 {
-                    let value = parse_next_block_as_usize(&mut blocks);
+                    let value = parse_next_block_as(&mut blocks);
                     search_instructions.$field = Option::Some(value);
                 }
             };
@@ -156,7 +157,7 @@ fn handle_go(s: &str, search_instruction_tx: &Sender<SearchInstruction>) {
 
         // get next block and parse it
         match blocks.next() {
-            Option::None          => {break;}
+            Option::None                => {break;}
             Option::Some(keyword) => {
 
                 match keyword {
@@ -188,12 +189,12 @@ fn handle_go(s: &str, search_instruction_tx: &Sender<SearchInstruction>) {
 
 }
 
-fn parse_and_handle_uci_command<M: Move, B: Board<M>>(
+fn parse_and_handle_uci_command<V: Value, M: Move, B: Board<M>>(
     command: &str,
     board: Arc<Mutex<B>>,
     search_instruction_tx: &Sender<SearchInstruction>,
     stop_tx: &Sender<()>,
-    write_request_tx: &Sender<Response<M>>,
+    write_request_tx: &Sender<Response<M, V>>,
     quit_tx: &Sender<()>
 ) {
 
@@ -217,10 +218,10 @@ fn parse_and_handle_uci_command<M: Move, B: Board<M>>(
     }
 }
 
-fn spawn_parsing_thread<M: Move, B: Board<M>>(
+fn spawn_parsing_thread<V: Value, M: Move, B: Board<M>>(
     board_ref: Arc<Mutex<B>>,
     search_instruction_tx: Sender<SearchInstruction>,
-    write_request_tx: Sender<Response<M>>,
+    write_request_tx: Sender<Response<M, V>>,
     stop_tx: Sender<()>,
     quit_tx: Sender<()>
 ) -> JoinHandle<()> {
@@ -253,8 +254,8 @@ fn spawn_parsing_thread<M: Move, B: Board<M>>(
     });
 }
 
-fn spawn_stdout_writer<M: Move>(
-    write_request_rx: Receiver<Response<M>>
+fn spawn_stdout_writer<V: Value, M: Move>(
+    write_request_rx: Receiver<Response<M, V>>
 ) -> JoinHandle<()> {
     return thread::spawn(move || {
         
@@ -269,9 +270,9 @@ fn spawn_stdout_writer<M: Move>(
 
             // handle message
             match message {
-                Response::<M>::UciResponse                  => emit_uci_response(),
-                Response::<M>::ReadyOk                      => emit_readyok(),
-                Response::<M>::Info(info)    => emit_search_info(info),
+                Response::UciResponse                       => emit_uci_response(),
+                Response::ReadyOk                           => emit_readyok(),
+                Response::Info(info)      => emit_search_info(info),
                 Response::Bestmove(result) => emit_search_result(result),
             }
 
@@ -280,12 +281,12 @@ fn spawn_stdout_writer<M: Move>(
     });
 }
 
-fn spawn_search_thread<M: Move, B: Board<M>>(
+fn spawn_search_thread<V: Value, M: Move, B: Board<M>>(
     board: Arc<Mutex<B>>,
     search_instruction_rx: Receiver<SearchInstruction>,
     stop_rx: Receiver<()>,
-    write_request_tx: Sender<Response<M>>,
-    search: Search<M, B>
+    write_request_tx: Sender<Response<M, V>>,
+    search: Search<V, M, B>
 ) -> JoinHandle<()> {
     return thread::spawn(move || {
 
@@ -315,7 +316,7 @@ fn spawn_search_thread<M: Move, B: Board<M>>(
     });
 }
 
-pub fn uci_loop<M: Move, B: Board<M>>(search: Search<M, B>) where B: Default {
+pub fn uci_loop<V: Value, M: Move, B: Board<M>>(search: Search<V, M, B>) where B: Default {
 
     // make a new board and wrap it in a Arc-Mutex, so that both threads can modify it
     let board = B::default();
@@ -326,7 +327,7 @@ pub fn uci_loop<M: Move, B: Board<M>>(search: Search<M, B>) where B: Default {
     let (search_instruction_tx, search_instruction_rx) = channel::<SearchInstruction>();
     let (stop_tx, stop_rx) = channel::<()>();
     let (quit_tx, quit_rx) = channel::<()>();
-    let (write_request_tx, write_request_rx) = channel::<Response<M>>();
+    let (write_request_tx, write_request_rx) = channel::<Response<M, V>>();
 
     // make multiple Senders for the write request channel
     let write_request_tx_for_parsing_thread = write_request_tx.clone();

@@ -1,11 +1,26 @@
 
 pub mod dummy_search;
+pub mod minimax;
+pub mod traits;
+pub mod generics;
 
 use std::fmt;
 use std::sync::mpsc::{Sender, Receiver};
 
-use crate::board::Move;
-use crate::uci::Response;
+use crate::search::traits::{Status, Searchable, Value};
+use crate::{
+    uci::Response,
+    board::{Move, Board}
+};
+
+
+pub fn evaluate_wrt_root<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(board: &mut B, distance_to_root: u8) -> V {
+    return match board.status() {
+        Status::WhiteIsDead => board.evaluate() + V::from(distance_to_root),
+        Status::BlackIsDead => board.evaluate() - V::from(distance_to_root),
+        _                   => board.evaluate(),
+    };
+}
 
 
 #[derive(Default, Clone)]
@@ -17,44 +32,46 @@ pub struct SearchInstruction {
     pub winc_in_ms: Option<usize>,
     pub binc_in_ms: Option<usize>,
     pub movestogo: Option<usize>,
-    pub depth: Option<usize>,
+    pub depth: Option<u8>,
     pub movetime_in_ms: Option<usize>,
     pub infinite: bool
 }
 
 #[derive(Clone)]
-pub enum Score {
-    // todo: Lowerbound, upperbound
-    Centipawn(i32),
-    Mate(u8),
+pub struct SearchInfo<M: Move, V: Value> {
+    // todo: seldepth, multipv, currmove, currmovenumber, hasfull, nps, tbhits, cpuload, string
+    pub depth: Option<u8>,
+    pub time: Option<usize>,
+    pub nodes_searched: usize,
+    pub was_stopped: bool,
+    pub bestmove: Option<M>,
+    pub evaluation: Option<V>,
+    pub principal_variation_line: Option<Vec<M>>
 }
 
-impl Score {
-    pub fn as_str(&self) -> String {
-        return match self {
-            Self::Centipawn(v) => format!("cp {}", v),
-            Self::Mate(c)       => format!("mate {}", c),
-        }
+impl<M: Move, V: Value> Default for SearchInfo<M, V> {
+    fn default() -> Self {
+        return Self {
+            depth: Option::None,
+            time: Option::None,
+            nodes_searched: 0,
+            was_stopped: false,
+            bestmove: Option::None,
+            evaluation: Option::None,
+            principal_variation_line: Option::None
+        };
     }
 }
 
 #[derive(Clone)]
-pub struct SearchInfo<M: Move> {
-    // todo: seldepth, multipv, currmove, currmovenumber, hasfull, nps, tbhits, cpuload, string
-    pub depth: Option<usize>,
-    pub time: Option<usize>,
-    pub nodes: Option<usize>,
-    pub score: Option<Score>,
-    pub principal_variation_line: Option<Vec<M>>
-}
-
-#[derive(Clone)]
-pub struct SearchResult<M :Move> {
+pub struct SearchResult<M: Move> {
     // todo: ponder
     pub bestmove: M
 }
 
-pub type Search<M, B> = fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M>>) -> SearchResult<M>;
+pub type IterableSearch<V, M, B> = fn(&mut B, u8, &Receiver<()>, &mut SearchInfo<M, V>) -> Result<(Option<M>, V), ()>;
+pub type Search<V, M, B> = fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M, V>>) -> SearchResult<M>;
+
 
 // for easier optional printing/formatting
 macro_rules! maybe_write {
@@ -86,13 +103,13 @@ impl fmt::Debug for SearchInstruction {
     }
 }
 
-impl<M: Move> fmt::Debug for SearchInfo<M> {
+impl<M: Move, V: Value + ToString> fmt::Debug for SearchInfo<M, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 
         // turn score into a string
-        let score = match &self.score {
+        let score = match &self.evaluation {
             Option::None        => Option::None,
-            Option::Some(score) => Option::Some(score.as_str())
+            Option::Some(score) => Option::Some(score.to_string())
         };
 
         // concat PV line into a single String (if there is any)
@@ -104,7 +121,7 @@ impl<M: Move> fmt::Debug for SearchInfo<M> {
         println!("\nSearchInfo:");
         maybe_write!(f, "depth:    {}", self.depth);
         maybe_write!(f, "time:     {}", self.time);
-        maybe_write!(f, "nodes:    {}", self.nodes);
+        maybe_write!(f, "nodes:    {}", Option::Some(self.nodes_searched));
         maybe_write!(f, "score:    {}", score);
         maybe_write!(f, "pv line:  {:?}", &pv_line);
         println!();

@@ -20,6 +20,7 @@ impl Move for DummyMove{
 }
 
 impl Board<DummyMove> for DummyBoard{
+    
     fn put_into_startpos(&mut self) {
         self.fen_like_base_position = String::from("startpos");
         self.pushed_moves = Vec::new();
@@ -28,12 +29,11 @@ impl Board<DummyMove> for DummyBoard{
         self.fen_like_base_position = String::from("fen ") + fen;
         self.pushed_moves = Vec::new();
     }
-    fn make(&mut self, r#move: DummyMove) {
+
+    fn make_move(&mut self, r#move: DummyMove) {
         self.pushed_moves.push(r#move);
     }
-    fn unmake(&mut self) {
-        self.pushed_moves.pop();
-    }
+    
     fn visualize(&self) {
         println!("Board state:");
         println!("  Base position: {}", self.fen_like_base_position);

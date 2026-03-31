@@ -1,31 +1,45 @@
 
 #![allow(dead_code)]
 #![allow(unused_variables)]
+#![allow(unused_imports)]
 
 pub mod board;
 pub mod search;
 pub mod uci;
 
-use board::dummy_board::{DummyMove, DummyBoard};
-use board::wrapped_board::{WrappedMove, WrappedBoard};
+use board::{
+    dummy_board::{DummyMove, DummyBoard},
+    wrapped_board::{WrappedMove, WrappedBoard}
+};
 
 use uci::uci_loop;
-use search::dummy_search::dummy_search;
+use search::{
+    dummy_search::dummy_search,
+    minimax::iterative_deepening
+};
 
 
-enum BoardType {
+enum KindOfBoard {
     Dummy,
     Wrapped
 }
 
-const BOARD_TYPE: BoardType = BoardType::Wrapped;
+enum KindOfSearch {
+    DummySearch,
+    Minimax
+}
+
+const BOARD: KindOfBoard = KindOfBoard::Wrapped;
+const SEARCH: KindOfSearch = KindOfSearch::Minimax;
 
 pub fn main() {
 
-    // start UCI loop using the Board chosen by BOARD_TYPE
-    match BOARD_TYPE {
-        BoardType::Dummy   => uci_loop::<DummyMove, DummyBoard>(dummy_search),
-        BoardType::Wrapped => uci_loop::<WrappedMove, WrappedBoard>(dummy_search)
+    // start UCI loop
+    match (BOARD, SEARCH) {
+        (KindOfBoard::Dummy, KindOfSearch::DummySearch)   => uci_loop::<i32, DummyMove, DummyBoard>(dummy_search),
+        (KindOfBoard::Dummy, KindOfSearch::Minimax)       => panic!(),
+        (KindOfBoard::Wrapped, KindOfSearch::DummySearch) => uci_loop::<i32, WrappedMove, WrappedBoard>(dummy_search),
+        (KindOfBoard::Wrapped, KindOfSearch::Minimax)     => uci_loop::<i32, WrappedMove, WrappedBoard>(iterative_deepening),
     }
     
 }

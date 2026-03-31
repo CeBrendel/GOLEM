@@ -1,25 +1,40 @@
 
 use crate::board::{Move, Board};
-use crate::search::{SearchInstruction, SearchInfo, SearchResult};
+use crate::search::{
+    SearchInstruction,
+    SearchInfo,
+    SearchResult,
+    traits::Value
+};
 use crate::uci::Response;
 
 use std::sync::mpsc::{Sender, Receiver};
 use std::thread;
 
-pub fn dummy_search<M: Move, B: Board<M>>(
+
+pub fn dummy_search<V: Value, M: Move, B: Board<M>>(
     _locked_board: &mut B,
     search_instruction: SearchInstruction,
     stop_rx: &Receiver<()>,
-    write_request_tx: &Sender<Response<M>>
+    write_request_tx: &Sender<Response<M, V>>
 ) -> SearchResult<M> {
     
     let mut pv: Vec<M> = Vec::new();
     let mut bestmove: M = M::from_algebraic("e2e4");
     let mut counter = 1;
     let wait_duration = std::time::Duration::from_millis(200);
-    let mut stopped: bool = false;
-
     loop {
+
+        // make fake search info for current depth
+        let mut search_info = SearchInfo {
+            depth: Option::Some(counter as u8),
+            nodes_searched: 0,
+            time: Option::None,
+            was_stopped: false,
+            evaluation: Option::None,
+            bestmove: Option::None,
+            principal_variation_line: Option::None,
+        };
 
         // pretend that this loop takes some time
         let mut inner_counter = 0;
@@ -28,7 +43,7 @@ pub fn dummy_search<M: Move, B: Board<M>>(
             // check if search should be stopped
             match stop_rx.try_recv() {
                 Err(_) => (),  // no stop signal was supplied
-                Ok(_)  => {stopped = true; break}
+                Ok(_)  => {search_info.was_stopped = true; break}
             }
 
 
@@ -43,19 +58,15 @@ pub fn dummy_search<M: Move, B: Board<M>>(
         }
 
         // if we recorded a stop signal from the inner loop, break this outer loop
-        if stopped {break}
+        if search_info.was_stopped {break}
 
         // make fake search info
         let bestmove_str = String::from("e2e") + (counter + 1).to_string().as_str();
         bestmove = M::from_algebraic(&bestmove_str);
         pv.push(bestmove.clone());
-        let search_info = SearchInfo {
-            score: Option::None,
-            depth: Option::Some(counter as usize),
-            nodes: Option::None,
-            time: Option::None,
-            principal_variation_line: Option::Some(pv.clone()),
-        };
+        search_info.bestmove = Option::Some(bestmove.clone());
+        search_info.principal_variation_line = Option::Some(pv.clone());
+        
         counter += 1;
         
         // send current search info

@@ -1,5 +1,8 @@
 
-use std::str::SplitWhitespace;
+use std::{
+    fmt,
+    str::{FromStr, SplitWhitespace}
+};
 use std::iter::Peekable;
 
 pub fn pop_first(s: &str) -> (&str, &str) {
@@ -9,10 +12,10 @@ pub fn pop_first(s: &str) -> (&str, &str) {
     };
 }
 
-pub fn parse_next_block_as_usize(blocks: &mut Peekable<SplitWhitespace>) -> usize {
+pub fn parse_next_block_as<T: FromStr>(blocks: &mut Peekable<SplitWhitespace>) -> T where <T as FromStr>::Err: fmt::Debug {
     match blocks.next() {
         Option::None                      => panic!("No block found!"),
-        Option::Some(number_as_str) => number_as_str.parse::<usize>().expect("Could not parse to usize!")
+        Option::Some(number_as_str) => number_as_str.parse::<T>().expect("Could not parse to requested type!")
     }
 }
 
