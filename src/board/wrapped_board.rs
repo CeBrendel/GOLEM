@@ -22,7 +22,7 @@ const SQUARES: [Square; 64] = [
     Square::A1, Square::B1, Square::C1, Square::D1, Square::E1, Square::F1, Square::G1, Square::H1
 ];
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct WrappedMove {
     pub r#move: chess::ChessMove
 }

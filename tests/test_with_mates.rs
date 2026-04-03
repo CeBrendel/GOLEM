@@ -7,8 +7,11 @@ use golem::{
         Board, Move, wrapped_board::{WrappedBoard, WrappedMove}
     },
     search::{
-        IterableSearch, SearchInfo, SearchInstruction,
-        minimax::{minimax, alpha_beta},
+        SearchInfo,
+        SearchInstruction,
+        iterative_deepening::IterableSearch,
+        minimax::minimax,
+        alpha_beta::alpha_beta,
         traits::{Searchable, Value}
     },
     uci::Response

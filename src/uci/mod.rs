@@ -1,14 +1,14 @@
 
+
 mod text_parsing;
 
 use crate::board::{Move, Board};
 use crate::search::traits::Value;
-use crate::search::{SearchInstruction, SearchInfo, SearchResult, Search};
+use crate::search::{SearchInstruction, SearchInfo, SearchResult, iterative_deepening::search};
 use crate::uci::text_parsing::{pop_first, parse_next_block_as, collect_blocks_until_next_keyword_or_end};
 
 use std::{thread, thread::JoinHandle};
 use std::sync::{Arc, Mutex, mpsc::{channel, Sender, Receiver}};
-
 
 #[derive(Clone)]
 pub enum Response<M: Move, V: Value> {
@@ -67,10 +67,13 @@ fn emit_search_info<M: Move, V: Value>(search_info: SearchInfo<M, V>) {
         Option::Some(score) => Option::Some(score.to_string())
     };
 
-    let pv_line: Option<String> = match &search_info.principal_variation_line {
-        Option::None             => Option::None,
-        Option::Some(v) => Option::Some(v.iter().map(|r#move| r#move.as_string()).collect::<Vec<_>>().join(" "))
-    };
+    // get pv line and turn it into a String
+    let pv_line = search_info.pv_table
+        .get_pv()
+        .iter()
+        .map(|r#move| r#move.as_string())
+        .collect::<Vec<_>>()
+        .join(" ");
 
     macro_rules! maybe_append {
         ($description: expr, $option: expr) => {
@@ -85,7 +88,7 @@ fn emit_search_info<M: Move, V: Value>(search_info: SearchInfo<M, V>) {
     maybe_append!(" time {}", search_info.time);
     maybe_append!(" nodes {}", Option::Some(search_info.nodes_searched));
     maybe_append!(" score {}", score);
-    maybe_append!(" pv {}", pv_line);
+    maybe_append!(" pv {}", Option::Some(pv_line));
 
     println!("{}", s);
 
@@ -286,7 +289,7 @@ fn spawn_search_thread<V: Value, M: Move, B: Board<M>>(
     search_instruction_rx: Receiver<SearchInstruction>,
     stop_rx: Receiver<()>,
     write_request_tx: Sender<Response<M, V>>,
-    search: Search<V, M, B>
+    search: search!(<V, M, B>)
 ) -> JoinHandle<()> {
     return thread::spawn(move || {
 
@@ -316,7 +319,7 @@ fn spawn_search_thread<V: Value, M: Move, B: Board<M>>(
     });
 }
 
-pub fn uci_loop<V: Value, M: Move, B: Board<M>>(search: Search<V, M, B>) where B: Default {
+pub fn uci_loop<V: Value, M: Move, B: Board<M>>(search: search!(<V, M, B>)) where B: Default {
 
     // make a new board and wrap it in a Arc-Mutex, so that both threads can modify it
     let board = B::default();

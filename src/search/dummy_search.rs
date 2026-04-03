@@ -26,15 +26,7 @@ pub fn dummy_search<V: Value, M: Move, B: Board<M>>(
     loop {
 
         // make fake search info for current depth
-        let mut search_info = SearchInfo {
-            depth: Option::Some(counter as u8),
-            nodes_searched: 0,
-            time: Option::None,
-            was_stopped: false,
-            evaluation: Option::None,
-            bestmove: Option::None,
-            principal_variation_line: Option::None,
-        };
+        let mut search_info = SearchInfo::default();
 
         // pretend that this loop takes some time
         let mut inner_counter = 0;
@@ -65,7 +57,7 @@ pub fn dummy_search<V: Value, M: Move, B: Board<M>>(
         bestmove = M::from_algebraic(&bestmove_str);
         pv.push(bestmove.clone());
         search_info.bestmove = Option::Some(bestmove.clone());
-        search_info.principal_variation_line = Option::Some(pv.clone());
+        search_info.pv_table.store(bestmove.clone(), counter as usize);
         
         counter += 1;
         

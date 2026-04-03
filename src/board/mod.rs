@@ -1,10 +1,9 @@
 
-pub mod dummy_board;
 pub mod wrapped_board;
 
 use std::fmt;
 
-pub trait Move: fmt::Debug + Clone + Send + Sync + 'static {
+pub trait Move: fmt::Debug + Clone + Copy + Default + Send + Sync + 'static {
     fn as_string(&self) -> String;
     fn from_algebraic(s: &str) -> Self;
 }

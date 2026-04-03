@@ -1,16 +1,22 @@
 
 pub mod dummy_search;
+pub mod iterative_deepening;
 pub mod minimax;
+pub mod alpha_beta;
 pub mod traits;
 pub mod generics;
+pub mod pv_table;
 
 use std::fmt;
 use std::sync::mpsc::{Sender, Receiver};
 
-use crate::search::traits::{Status, Searchable, Value};
 use crate::{
     uci::Response,
-    board::{Move, Board}
+    board::{Move, Board},
+    search::{
+        traits::{Status, Searchable, Value},
+        pv_table::PVTable
+    }
 };
 
 
@@ -46,7 +52,7 @@ pub struct SearchInfo<M: Move, V: Value> {
     pub was_stopped: bool,
     pub bestmove: Option<M>,
     pub evaluation: Option<V>,
-    pub principal_variation_line: Option<Vec<M>>
+    pub pv_table: PVTable<M>
 }
 
 impl<M: Move, V: Value> Default for SearchInfo<M, V> {
@@ -58,7 +64,7 @@ impl<M: Move, V: Value> Default for SearchInfo<M, V> {
             was_stopped: false,
             bestmove: Option::None,
             evaluation: Option::None,
-            principal_variation_line: Option::None
+            pv_table: PVTable::new()
         };
     }
 }
@@ -69,7 +75,7 @@ pub struct SearchResult<M: Move> {
     pub bestmove: M
 }
 
-pub type IterableSearch<V, M, B> = fn(&mut B, u8, &Receiver<()>, &mut SearchInfo<M, V>) -> Result<(Option<M>, V), ()>;
+
 pub type Search<V, M, B> = fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M, V>>) -> SearchResult<M>;
 
 
@@ -113,17 +119,19 @@ impl<M: Move, V: Value + ToString> fmt::Debug for SearchInfo<M, V> {
         };
 
         // concat PV line into a single String (if there is any)
-        let pv_line: Option<String> = match &self.principal_variation_line {
-            Option::None => Option::None,
-            Option::Some(v) => Option::Some(v.iter().map(|r#move| r#move.as_string()).collect::<Vec<_>>().join(" "))
-        };
+        let pv_line = self
+            .pv_table.get_pv()
+            .iter()
+            .map(|r#move| r#move.as_string())
+            .collect::<Vec<_>>()
+            .join(" ");
 
         println!("\nSearchInfo:");
         maybe_write!(f, "depth:    {}", self.depth);
         maybe_write!(f, "time:     {}", self.time);
         maybe_write!(f, "nodes:    {}", Option::Some(self.nodes_searched));
         maybe_write!(f, "score:    {}", score);
-        maybe_write!(f, "pv line:  {:?}", &pv_line);
+        writeln!(f, "pv line:  {:?}", pv_line)?;
         println!();
 
         return Ok(());
