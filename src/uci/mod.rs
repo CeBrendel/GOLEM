@@ -2,13 +2,20 @@
 
 mod text_parsing;
 
-use crate::board::{Move, Board};
-use crate::search::traits::Value;
-use crate::search::{SearchInstruction, SearchInfo, SearchResult, iterative_deepening::search};
-use crate::uci::text_parsing::{pop_first, parse_next_block_as, collect_blocks_until_next_keyword_or_end};
+use crate::{
+    board::{Move, Board},
+    search::{Value, SearchInstruction, SearchInfo, SearchResult, implSearch},
+    uci::text_parsing::{pop_first, parse_next_block_as, collect_blocks_until_next_keyword_or_end}
+};
 
-use std::{thread, thread::JoinHandle};
-use std::sync::{Arc, Mutex, mpsc::{channel, Sender, Receiver}};
+use std::{
+    thread,
+    thread::JoinHandle,
+    sync::{
+        Arc, Mutex,
+        mpsc::{channel, Sender, Receiver}
+    }
+};
 
 #[derive(Clone)]
 pub enum Response<M: Move, V: Value> {
@@ -289,7 +296,7 @@ fn spawn_search_thread<V: Value, M: Move, B: Board<M>>(
     search_instruction_rx: Receiver<SearchInstruction>,
     stop_rx: Receiver<()>,
     write_request_tx: Sender<Response<M, V>>,
-    search: search!(<V, M, B>)
+    search: implSearch!(<V, M, B>)
 ) -> JoinHandle<()> {
     return thread::spawn(move || {
 
@@ -319,7 +326,7 @@ fn spawn_search_thread<V: Value, M: Move, B: Board<M>>(
     });
 }
 
-pub fn uci_loop<V: Value, M: Move, B: Board<M>>(search: search!(<V, M, B>)) where B: Default {
+pub fn uci_loop<V: Value, M: Move, B: Board<M>>(search: implSearch!(<V, M, B>)) where B: Default {
 
     // make a new board and wrap it in a Arc-Mutex, so that both threads can modify it
     let board = B::default();

@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use crate::{
     board::{Board, Move},
-    search::traits::{Status, Searchable, Value}
+    search::{Value, Status, Searchable}
 };
 
 use chess;

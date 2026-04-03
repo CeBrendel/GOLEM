@@ -1,23 +1,46 @@
 
-pub mod dummy_search;
 pub mod iterative_deepening;
 pub mod minimax;
 pub mod alpha_beta;
-pub mod traits;
 pub mod generics;
 pub mod pv_table;
 
-use std::fmt;
-use std::sync::mpsc::{Sender, Receiver};
+
+use std::{
+    fmt,
+    sync::mpsc::{Sender, Receiver},
+    ops::{Add, Sub, Neg}
+};
 
 use crate::{
     uci::Response,
     board::{Move, Board},
-    search::{
-        traits::{Status, Searchable, Value},
-        pv_table::PVTable
-    }
+    search::pv_table::PVTable
 };
+
+
+pub trait Value: Eq + PartialOrd + Clone + Copy + From<u8> + Add<Self, Output=Self> + Sub<Self, Output=Self> + Neg<Output=Self> + ToString + Send + 'static {
+    const MIN: Self;
+    const WHITE_IS_DEAD: Self;
+    const ZERO: Self;
+    const BLACK_IS_DEAD: Self;
+    const MAX: Self;
+}
+
+pub enum Status {
+    Ongoing,
+    Stalemate,
+    WhiteIsDead,
+    BlackIsDead
+}
+
+pub trait Searchable<M: Move, V: Value>: Board<M> {
+    fn whites_turn(&self) -> bool;
+    fn unmake_move(&mut self);
+    fn get_legal_moves(&self) -> Vec<M>;
+    fn status(&self) -> Status;
+    fn evaluate(&self) -> V;
+}
 
 
 pub fn evaluate_wrt_root<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(board: &mut B, distance_to_root: u8) -> V {
@@ -77,6 +100,14 @@ pub struct SearchResult<M: Move> {
 
 
 pub type Search<V, M, B> = fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M, V>>) -> SearchResult<M>;
+
+macro_rules! implSearch {
+    (<$V: ident, $B: ident, $M: ident>) => {
+        impl 'static + Sync + Send + Fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M, V>>) -> SearchResult<M>
+    };
+}
+
+pub(crate) use implSearch;
 
 
 // for easier optional printing/formatting

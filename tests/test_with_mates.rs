@@ -4,15 +4,14 @@
 
 use golem::{
     board::{
-        Board, Move, wrapped_board::{WrappedBoard, WrappedMove}
+        Board, Move,
+        wrapped_board::{WrappedBoard, WrappedMove}
     },
     search::{
-        SearchInfo,
-        SearchInstruction,
+        Value, Searchable, SearchInstruction, SearchInfo,
         iterative_deepening::IterableSearch,
         minimax::minimax,
         alpha_beta::alpha_beta,
-        traits::{Searchable, Value}
     },
     uci::Response
 };

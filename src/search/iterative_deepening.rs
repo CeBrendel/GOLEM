@@ -1,22 +1,22 @@
 
-use crate::{
-    board::{Board, Move},
-    search::{
-        evaluate_wrt_root,
-        SearchInfo,
-        SearchInstruction,
-        SearchResult,
-        Search,
-        generics::{Bool, False, Maximizer, Minimizer, Optimizer, True},
-        traits::{Status, Searchable, Value}
-    }, uci::Response
-};
-
 use std::{
     sync::mpsc::{Receiver, Sender}, time::{Duration, SystemTime}
 };
 
+use crate::{
+    board::{Board, Move},
+    search::{
+        evaluate_wrt_root,
+        SearchInstruction, SearchInfo, SearchResult,
+        Value, Status, Searchable, implSearch,
+        generics::{Bool, False, True, Optimizer, Maximizer, Minimizer},
+    },
+    uci::Response
+};
+
+
 pub type IterableSearch<V, M, B> = fn(&mut B, u8, &Receiver<()>, &mut SearchInfo<M, V>) -> Result<(Option<M>, V), ()>;
+
 
 fn inner_iterative_deepening<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
     board: &mut B,
@@ -64,18 +64,9 @@ fn inner_iterative_deepening<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
 }
 
 
-macro_rules! search {
-    (<$V: ident, $B: ident, $M: ident>) => {
-        impl 'static + Sync + Send + Fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M, V>>) -> SearchResult<M>
-    };
-}
-
-pub(crate) use search;
-
-
 pub fn iterative_deepening<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
     iterable_search: IterableSearch<V, M, B>
-) -> search!(<V, M, B>) {
+) -> implSearch!(<V, M, B>) {
     
     let partial_iterative_deepening = move |
         board: &mut B,

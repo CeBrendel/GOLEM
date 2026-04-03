@@ -1,19 +1,19 @@
 
+use std::{
+    sync::mpsc::{Receiver, Sender}, time::{Duration, SystemTime}
+};
+
 use crate::{
     board::{Board, Move},
     search::{
         evaluate_wrt_root,
-        SearchInfo,
-        SearchInstruction,
-        SearchResult,
-        generics::{Bool, False, Maximizer, Minimizer, Optimizer, True},
-        traits::{Status, Searchable, Value}
-    }, uci::Response
+        Value, Status, Searchable, 
+        SearchInstruction, SearchInfo, SearchResult,
+        generics::{Bool, False, True, Optimizer, Maximizer, Minimizer},
+    },
+    uci::Response
 };
 
-use std::{
-    sync::mpsc::{Receiver, Sender}, time::{Duration, SystemTime}
-};
 
 pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
     board: &mut B,
