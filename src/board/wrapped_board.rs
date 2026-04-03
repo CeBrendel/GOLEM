@@ -27,10 +27,68 @@ pub struct WrappedMove {
     pub r#move: chess::ChessMove
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UndoInformation {
+    board: chess::Board,
+    material_strength: i32
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct WrappedBoard {
     pub board: chess::Board,
-    pub history: Vec<chess::Board>
+    material_strength: i32,
+    history: Vec<UndoInformation>
+}
+
+impl WrappedBoard {
+
+    fn get_piece_value(piece: chess::Piece, color: chess::Color) -> i32 {
+
+        // get value of piece
+        let piece_value = match piece {
+            chess::Piece::Pawn   => 100,
+            chess::Piece::Knight => 300,
+            chess::Piece::Bishop => 300,
+            chess::Piece::Rook   => 500,
+            chess::Piece::Queen  => 900,
+            chess::Piece::King   => 0
+        };
+
+        // return value with a possible sign flip
+        return match color {
+            chess::Color::White => piece_value,
+            chess::Color::Black => -piece_value
+        };
+
+    }
+
+    fn initialize_material_stength(&mut self) {
+
+        // reset value
+        self.material_strength = 0;
+
+        // loop through all squares and record any material
+        for square in SQUARES {
+
+            // get piece on square if there is any
+            let piece = match self.board.piece_on(square) {
+                Option::None               => continue,
+                Option::Some(piece) => piece
+            };
+
+            // get color of piece
+            let color = match self.board.color_on(square) {
+                Option::None               => panic!("Piece on given square had no color!"),
+                Option::Some(color) => color
+            };
+
+            // record piece value
+            self.material_strength += WrappedBoard::get_piece_value(piece, color)
+
+        }
+
+    }
+
 }
 
 impl WrappedBoard {
@@ -116,24 +174,74 @@ impl Board<WrappedMove> for WrappedBoard {
 
     fn put_into_startpos(&mut self) {
        self.board = chess::Board::default();
+       self.initialize_material_stength();
        self.history = Vec::new();
     }
 
     fn put_into_fen(&mut self, fen: &str) {
         self.board = chess::Board::from_str(fen).expect("Invalid FEN!");
+        self.initialize_material_stength();
         self.history = Vec::new();
     }
 
     fn make_move(&mut self, r#move: WrappedMove) {
 
-        // clone current board
-        let old_board = self.board.clone();
+        // clone current board and material strength, make undo information
+        let board_clone = self.board.clone();
+        let material_strength_clone = self.material_strength.clone();
+        let undo_information = UndoInformation {
+            board: board_clone,
+            material_strength: material_strength_clone
+        };
+
+        // adjust material strength if the move captures
+        let destination = r#move.r#move.get_dest();
+        match self.board.piece_on(destination) {
+            Option::None => {
+
+                // check for en passant
+                match self.board.en_passant() {
+                    Option::None                    => {},
+                    Option::Some(ep_square) => {
+
+                        // if the destination is the en passant square, then a capture happened
+                        if destination == ep_square {
+                            let color = self.board.side_to_move();
+                            let pawn_value = WrappedBoard::get_piece_value(chess::Piece::Pawn, !color);
+                            self.material_strength -= pawn_value;
+                        }
+                    }
+                }
+
+            },
+            Option::Some(victim) => {
+                
+                // get value of victim
+                let color = self.board.side_to_move();
+                let victim_value = WrappedBoard::get_piece_value(victim, !color);
+                
+                // adjust material
+                self.material_strength -= victim_value;
+            }
+        }
+
+        // adjust material strength if the move promotes
+        match r#move.r#move.get_promotion() {
+            Option::None               => {}
+            Option::Some(piece) => {
+                let color = self.board.side_to_move();
+                let piece_value = WrappedBoard::get_piece_value(piece, color);
+                let pawn_value = WrappedBoard::get_piece_value(chess::Piece::Pawn, color);
+                self.material_strength += piece_value - pawn_value
+            }
+        }
 
         // make move on original board
-        old_board.make_move(r#move.r#move, &mut self.board);
+        board_clone.make_move(r#move.r#move, &mut self.board);
 
         // remember old board
-        self.history.push(old_board);
+        self.history.push(undo_information);
+
     }
 
     fn visualize(&self) {
@@ -146,7 +254,7 @@ impl Value for i32 {
     const MIN: Self = i32::MIN;
     const WHITE_IS_DEAD: Self = -30_000;
     const ZERO: Self = 0;
-    const BLACK_IS_DEAD: Self = 31_000;
+    const BLACK_IS_DEAD: Self = 30_000;
     const MAX: Self = i32::MAX;
 }
 
@@ -160,7 +268,14 @@ impl Searchable<WrappedMove, i32> for WrappedBoard {
     }
 
     fn unmake_move(&mut self) {
-        self.board = self.history.pop().expect("Cannot unmake moves on an empty history!");
+
+        // get information from history needed for undoing move
+        let undo_information = self.history.pop().expect("Cannot unmake moves on an empty history!");
+        
+        // undo move
+        self.material_strength = undo_information.material_strength;
+        self.board = undo_information.board;
+
     }
 
     fn get_legal_moves(&self) -> Vec<WrappedMove> {
@@ -181,7 +296,7 @@ impl Searchable<WrappedMove, i32> for WrappedBoard {
 
         // check if we are in a stale- or checkmate
         match self.board.status() {
-            chess::BoardStatus::Ongoing   => {},
+            chess::BoardStatus::Ongoing   => {return self.material_strength;},
             chess::BoardStatus::Stalemate => {return 0;},
             chess::BoardStatus::Checkmate => {
                 if self.whites_turn() {
@@ -191,35 +306,6 @@ impl Searchable<WrappedMove, i32> for WrappedBoard {
                 }
             }
         }
-
-        // loop through all squares and sum piece values
-        let mut evaluation: i32 = 0;
-        for square in SQUARES {
-
-            // get piece on square if there is any
-            let piece = match self.board.piece_on(square) {
-                Option::None               => continue,
-                Option::Some(piece) => piece
-            };
-
-            // get value of piece
-            let piece_value = match piece {
-                chess::Piece::Pawn   => 100,
-                chess::Piece::Knight => 300,
-                chess::Piece::Bishop => 300,
-                chess::Piece::Rook   => 500,
-                chess::Piece::Queen  => 900,
-                chess::Piece::King   => 0
-            };
-
-            // get color of piece
-            let color_sign = if self.board.color_on(square).unwrap() == chess::Color::White {1} else {-1};
-
-            // add piece value (with the right sign)
-            evaluation += color_sign * piece_value
-        }
-
-        return evaluation;
 
     }
     
