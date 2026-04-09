@@ -1,0 +1,160 @@
+
+use std::sync::mpsc::Receiver;
+
+use crate::{
+    board::Move,
+    search::{
+        SearchInfo, Searchable, Value, evaluate_wrt_root,
+        generics::{Bool, False, True},
+        move_ordering::{MVVLVAScorer, MoveIterator}
+    }
+};
+
+
+pub fn negamax<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M>>(
+    board: &mut B,
+    depth: u8,
+    stop_rx: &Receiver<()>,
+    search_info: &mut SearchInfo<M, V>
+) -> Result<(), ()> {
+
+    // will be called with the correct (const) arguments to accomplish the search
+    fn inner_negamax<
+        FlipEval: Bool,  // whether the sign of the evaluation needs to be flipped
+        IsEntry: Bool,  // whether this is the entrypoint of the recursion (only then we write to the move buffer)
+        V: Value,
+        M: Move,
+        B: Searchable<M, V> + MVVLVAScorer<M>
+    >(
+        board: &mut B,
+        depth_left: u8,
+        distance_to_root: u8,
+        mut alpha: V,
+        beta: V,
+        stop_rx: &Receiver<()>,
+        search_info: &mut SearchInfo<M, V>
+    ) -> V {
+
+        // check if search should be stopped
+        // TODO: Factor this modulus out as a configurable
+        if search_info.nodes_searched % 4096 == 0 {
+            match stop_rx.try_recv() {
+                Err(_) => {},
+                Ok(_)  => {search_info.was_stopped = true;}
+            }
+        }
+
+        // check if search was stopped
+        if search_info.was_stopped {
+            return V::ZERO;
+        }
+
+        // increment nodes counter
+        search_info.nodes_searched += 1;
+
+        // base case of the recursion
+        // TODO: If we are in check, we should increase depth anyways!
+        if depth_left == 0 {
+            if FlipEval::VALUE {
+                return -evaluate_wrt_root(board, distance_to_root);
+            } else {
+                return evaluate_wrt_root(board, distance_to_root);
+            }
+        }
+
+        // get legal moves in current position
+        let legal_moves = board.get_legal_moves();
+        
+        // if there are no legal moves to make, simply return the evaluation of the board
+        if legal_moves.len() == 0 {
+            if FlipEval::VALUE {
+                return -evaluate_wrt_root(board, distance_to_root);
+            } else {
+                return evaluate_wrt_root(board, distance_to_root);
+            }
+        }
+
+        // but them into an iterator sorting them heuristically; afterwards clear pv table for current depth
+        let legal_moves = MoveIterator::from_vec(legal_moves, search_info, board);
+        search_info.pv_table.clear_at(distance_to_root as usize);
+
+        // iterate over all moves and evaluate the resulting position via a recursive call
+        let mut optimal_value: V = V::MIN;
+        let mut is_first_iteration_of_loop: bool = true;
+        for r#move in legal_moves {
+
+            // make move
+            board.make_move(r#move);
+
+            // recursive call
+            let child_evaluation = -inner_negamax::<
+                FlipEval::Negation,  // this search will be from the opposite point of view
+                False,  // this search will never be the entrypoint of the main search
+                V, M, B
+            >(
+                board,
+                depth_left - 1,  // search one depth less
+                distance_to_root + 1, // search one depth durther from the root
+                -beta,
+                -alpha,
+                stop_rx,
+                search_info
+            );
+
+            // unmake move to restore previous position
+            board.unmake_move();
+
+            // compare values to decide if we have found a better move
+            if child_evaluation > optimal_value {
+
+                // remember better evaluation
+                optimal_value = child_evaluation;
+
+                // if we are in the entrypoint to the main search, also remember the move and it evaluation
+                if IsEntry::VALUE {
+                    search_info.evaluation = Option::Some(optimal_value);
+                    search_info.bestmove = Option::Some(r#move);
+                }
+
+                // adjust alpha
+                if child_evaluation > alpha {
+                    alpha = child_evaluation;
+                    search_info.pv_table.store(r#move, distance_to_root as usize);
+                }
+
+                // check for beta cutoff
+                if child_evaluation >= beta {
+                    search_info.fail_high_counter += 1;
+                    if is_first_iteration_of_loop {
+                        search_info.fail_high_on_first_counter += 1;
+                    }
+                    break;
+                }
+                
+            }
+
+            // we have completed the first iteration
+            is_first_iteration_of_loop = false;
+
+        }
+
+        // return evaluation of the best move found
+        return optimal_value;
+
+    }
+
+    // manual dispatch into the right implementation of inner_minimax
+    match board.whites_turn() {
+        true  => inner_negamax::<False, True, V, M, B>(board, depth, 0, V::MIN, V::MAX, stop_rx, search_info),
+        false => inner_negamax::<True,  True, V, M, B>(board, depth, 0, V::MIN, V::MAX, stop_rx, search_info)
+    };
+
+    // if search was stopped early, return an Err
+    if search_info.was_stopped {
+        return Err(());
+    }
+
+    // end search
+    return Ok(());
+    
+}

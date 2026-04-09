@@ -12,6 +12,7 @@ use golem::{
         iterative_deepening::IterableSearch,
         minimax::minimax,
         alpha_beta::alpha_beta,
+        negamax::negamax
     },
     uci::Response
 };
@@ -3526,6 +3527,13 @@ fn minimax_for_mate_in_two() {
 fn alpha_beta_for_mate_in_two() {
     read_and_test(MATES_IN_TWO, 3, alpha_beta);
 }
+
+#[test]
+fn negamax_for_mate_in_two() {
+    read_and_test(MATES_IN_TWO, 3, negamax);
+}
+
+
 
 #[test]
 fn minimax_for_mate_in_three() {

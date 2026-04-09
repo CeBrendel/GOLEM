@@ -2,6 +2,8 @@
 pub mod iterative_deepening;
 pub mod minimax;
 pub mod alpha_beta;
+pub mod negamax;
+pub mod quiescence;
 pub mod generics;
 pub mod pv_table;
 pub mod transposition_table;
