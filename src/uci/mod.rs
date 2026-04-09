@@ -4,7 +4,7 @@ mod text_parsing;
 
 use crate::{
     board::{Move, Board},
-    search::{Value, SearchInstruction, SearchInfo, SearchResult, implSearch},
+    search::{Value, SearchInstruction, SearchInfo, implSearch},
     uci::text_parsing::{pop_first, parse_next_block_as, collect_blocks_until_next_keyword_or_end}
 };
 
@@ -23,7 +23,7 @@ pub enum Response<M: Move, V: Value> {
     UciResponse,
     ReadyOk,
     Info(SearchInfo<M, V>),
-    Bestmove(SearchResult<M>)
+    Bestmove(M)
 }
 
 fn clear_channel<T>(receiver: &Receiver<T>) {
@@ -66,6 +66,7 @@ fn emit_readyok() {
 
 fn emit_search_info<M: Move, V: Value>(search_info: SearchInfo<M, V>) {
     
+    // the string that eventually will be emitted
     let mut s = String::from("info");
 
     // turn score into a string
@@ -76,11 +77,17 @@ fn emit_search_info<M: Move, V: Value>(search_info: SearchInfo<M, V>) {
 
     // get pv line and turn it into a String
     let pv_line = search_info.pv_table
-        .get_pv()
+        .get_pv_line()
         .iter()
         .map(|r#move| r#move.as_string())
         .collect::<Vec<_>>()
         .join(" ");
+
+    macro_rules! append {
+        ($description: expr, $value: expr) => {
+            s += &format!($description, $value);
+        };
+    }
 
     macro_rules! maybe_append {
         ($description: expr, $option: expr) => {
@@ -93,16 +100,16 @@ fn emit_search_info<M: Move, V: Value>(search_info: SearchInfo<M, V>) {
 
     maybe_append!(" depth {}", search_info.depth);
     maybe_append!(" time {}", search_info.time);
-    maybe_append!(" nodes {}", Option::Some(search_info.nodes_searched));
+          append!(" nodes {}", search_info.nodes_searched);
     maybe_append!(" score {}", score);
-    maybe_append!(" pv {}", Option::Some(pv_line));
+          append!(" pv {}", pv_line);
 
     println!("{}", s);
 
 }
 
-fn emit_search_result<M: Move>(search_result: SearchResult<M>) {
-    println!("bestmove {}\n", search_result.bestmove.as_string());
+fn emit_bestmove<M: Move>(bestmove: M) {
+    println!("bestmove {}\n", bestmove.as_string());
 }
 
 fn handle_position<M: Move, B: Board<M>>(s: &str, board: Arc<Mutex<B>>) {
@@ -283,7 +290,7 @@ fn spawn_stdout_writer<V: Value, M: Move>(
                 Response::UciResponse                       => emit_uci_response(),
                 Response::ReadyOk                           => emit_readyok(),
                 Response::Info(info)      => emit_search_info(info),
-                Response::Bestmove(result) => emit_search_result(result),
+                Response::Bestmove(result) => emit_bestmove(result),
             }
 
         }
@@ -316,10 +323,11 @@ fn spawn_search_thread<V: Value, M: Move, B: Board<M>>(
             clear_channel(&stop_rx);
 
             // do the search
-            let result = search(&mut locked_board, search_instructions, &stop_rx, &write_request_tx);
+            let search_info = search(&mut locked_board, search_instructions, &stop_rx, &write_request_tx);
         
-            // send the result
-            write_request_tx.send(Response::Bestmove(result)).expect("Sending of search result failed!");
+            // get bestmove and send it
+            let bestmove = search_info.bestmove.expect("Search did not return a bestmove!");
+            write_request_tx.send(Response::Bestmove(bestmove)).expect("Sending of bestmove write-request failed!");
 
         }
 

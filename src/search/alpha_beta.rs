@@ -1,27 +1,22 @@
 
-use std::{
-    sync::mpsc::{Receiver, Sender},
-    time::{Duration, SystemTime}
-};
+use std::sync::mpsc::Receiver;
 
 use crate::{
-    board::{Board, Move},
+    board::Move,
     search::{
         evaluate_wrt_root,
-        Value, Status, Searchable,
-        SearchInstruction, SearchInfo, SearchResult,
+        Value, Searchable, SearchInfo,
         generics::{Bool, False, True, Optimizer, Maximizer, Minimizer},
-    },
-    uci::Response
+    }
 };
 
 
-pub fn alpha_beta<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
+pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V>>(
     board: &mut B,
     depth: u8,
     stop_rx: &Receiver<()>,
     search_info: &mut SearchInfo<M, V>
-) -> Result<(Option<M>, V), ()> {
+) -> Result<(), ()> {
 
     // will be called with the correct (const) arguments to accomplish the search
     fn inner_alpha_beta<
@@ -29,7 +24,7 @@ pub fn alpha_beta<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
         IsEntry: Bool,  // whether this is the entrypoint of the recursion (only then we write to the move buffer)
         V: Value,
         M: Move,
-        B: Board<M> + Searchable<M, V>
+        B: Searchable<M, V>
     >(
         board: &mut B,
         depth_left: u8,
@@ -76,10 +71,11 @@ pub fn alpha_beta<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
 
         // iterate over all moves and evaluate the resulting position via a recursive call
         let mut optimal_value: V = if O::IS_MAXIMIZER {V::MIN} else {V::MAX};
+        let mut is_first_iteration_of_loop: bool = true;
         for r#move in legal_moves {
 
             // make move
-            board.make_move(r#move.clone());  // TODO: MAybe remove this clone by enforcing M: Copy?
+            board.make_move(r#move);
 
             // recursive call
             let child_evaluation = inner_alpha_beta::<
@@ -126,17 +122,28 @@ pub fn alpha_beta<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
                 }
 
                 // check for cutoff
-                let cutoff = if O::IS_MAXIMIZER {
+                if O::IS_MAXIMIZER {
                     if child_evaluation >= beta {
+                        search_info.fail_high_counter += 1;
+                        if is_first_iteration_of_loop {
+                            search_info.fail_high_on_first_counter += 1;
+                        }
                         break;
                     }
                 } else {
                     if alpha >= child_evaluation {
+                        search_info.fail_high_counter += 1;
+                        if is_first_iteration_of_loop {
+                            search_info.fail_high_on_first_counter += 1;
+                        }
                         break;
                     }
                 };
                 
             }
+            
+            // we have completed the first iteration
+            is_first_iteration_of_loop = false;
 
         }
 
@@ -146,7 +153,7 @@ pub fn alpha_beta<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
     }
 
     // manual dispatch into the right implementation of inner_minimax
-    let evaluation = match board.whites_turn() {
+    let _ = match board.whites_turn() {
         true  => inner_alpha_beta::<Maximizer, True, V, M, B>(board, depth, 0, V::MIN, V::MAX, stop_rx, search_info),
         false => inner_alpha_beta::<Minimizer, True, V, M, B>(board, depth, 0, V::MIN, V::MAX, stop_rx, search_info)
     };
@@ -156,7 +163,7 @@ pub fn alpha_beta<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
         return Err(());
     }
 
-    // return best move and its evaluation
-    return Ok((search_info.bestmove.clone(), evaluation));
+    // end search
+    return Ok(());
     
 }

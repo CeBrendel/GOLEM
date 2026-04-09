@@ -3486,11 +3486,9 @@ fn read_and_test(str_of_mates: &str, ply_depth_to_mate: u8, search: IterableSear
         
         // do search and get move found by it
         let mut search_info = SearchInfo::default();
-        let (maybe_move, evaluation) = match search(&mut board, ply_depth_to_mate, &stop_rx, &mut search_info) {
-            Err(_) => panic!("Search failed!"),
-            Ok(t) => t
-        };
-        let r#move = maybe_move.unwrap();
+        search(&mut board, ply_depth_to_mate, &stop_rx, &mut search_info).expect("Search failed!");
+        let r#move = search_info.bestmove.expect("Search did not return a bestmove!");
+        let evaluation = search_info.evaluation.expect("Search did not return an evaluation!");
         
         // convert found move and best move to long algebraic notation
         let found_move_in_long_algebraic = r#move.r#move.to_string();

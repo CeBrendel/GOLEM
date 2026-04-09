@@ -1,30 +1,26 @@
 
-use std::{
-    sync::mpsc::{Receiver, Sender}, time::{Duration, SystemTime}
-};
+use std::{sync::mpsc::{Receiver, Sender}, time::Instant};
 
 use crate::{
-    board::{Board, Move},
+    board::Move,
     search::{
-        evaluate_wrt_root,
-        SearchInstruction, SearchInfo, SearchResult,
-        Value, Status, Searchable, implSearch,
-        generics::{Bool, False, True, Optimizer, Maximizer, Minimizer},
+        SearchInstruction, SearchInfo,
+        Value, Searchable, implSearch
     },
     uci::Response
 };
 
 
-pub type IterableSearch<V, M, B> = fn(&mut B, u8, &Receiver<()>, &mut SearchInfo<M, V>) -> Result<(Option<M>, V), ()>;
+pub type IterableSearch<V, M, B> = fn(&mut B, u8, &Receiver<()>, &mut SearchInfo<M, V>) -> Result<(), ()>;
 
 
-fn inner_iterative_deepening<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
+fn inner_iterative_deepening<V: Value, M: Move, B: Searchable<M, V>>(
     board: &mut B,
     search_instruction: SearchInstruction,
     stop_rx: &Receiver<()>,
     write_request_tx: &Sender<Response<M, V>>,
     iterable_search: IterableSearch<V, M, B>
-) -> SearchResult<M> {
+) -> SearchInfo<M, V> {
 
     // get maximum depth (either infinite or some fixed number)
     let max_depth = match (search_instruction.infinite, search_instruction.depth) {
@@ -34,37 +30,47 @@ fn inner_iterative_deepening<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
     };
 
     // loop through various depths
-    let mut maybe_bestmove: Option<M> = Option::None;
-    for depth in 1..max_depth {
+    let mut search_info_of_last_completed_search: Option<SearchInfo<M, V>> = Option::None;
+    for depth in 1..=max_depth {
 
         // construct new search info, that gets modified in the search
-        let mut search_info = SearchInfo::default();
+        // clone PVTable of previous search info (if there is any)
+        let mut search_info = match search_info_of_last_completed_search {
+            Option::None                             => SearchInfo::default(),
+            Option::Some(previous) => SearchInfo::from_pv_table(&previous.pv_table)
+        };
+
+        // set depth
+        search_info.depth = Option::Some(depth);
+
+        // for timing the search
+        let now = Instant::now();
 
         // do search to the current depth
-        let (bestmove, evaluation) = match iterable_search(board, depth, stop_rx, &mut search_info) {
-            Err(_)                     => break,  // is the search was stopped and returned an Err, break the loop
-            Ok(result) => result
+        match iterable_search(board, depth, stop_rx, &mut search_info) {
+            Err(_) => break,  // is the search was stopped and returned an Err, break the loop
+            Ok(_)  => {}
         };
+
+        // time the search and remember the result
+        search_info.time = Option::Some(now.elapsed().as_millis());
 
         println!("SearchInfo after depth {}:\n{:?}", depth, search_info);
 
-        // remember best move
-        maybe_bestmove = bestmove;
-        search_info.evaluation = Option::Some(evaluation);
+        // remember search info
+        search_info_of_last_completed_search = Option::Some(search_info);
 
         // send search info
         write_request_tx.send(Response::Info(search_info)).expect("Sending search info failed!");
 
     }
 
-    return SearchResult{
-        bestmove: maybe_bestmove.expect("Iterative deepening could not identifiy a move!")
-    };
+    return search_info_of_last_completed_search.expect("Iterative deepening could not complete a search!");
 
 }
 
 
-pub fn iterative_deepening<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
+pub fn iterative_deepening<V: Value, M: Move, B: Searchable<M, V>>(
     iterable_search: IterableSearch<V, M, B>
 ) -> implSearch!(<V, M, B>) {
     

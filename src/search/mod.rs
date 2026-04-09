@@ -66,16 +66,18 @@ pub struct SearchInstruction {
     pub infinite: bool
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct SearchInfo<M: Move, V: Value> {
     // todo: seldepth, multipv, currmove, currmovenumber, hasfull, nps, tbhits, cpuload, string
     pub depth: Option<u8>,
-    pub time: Option<usize>,
+    pub time: Option<u128>,
     pub nodes_searched: usize,
     pub was_stopped: bool,
     pub bestmove: Option<M>,
     pub evaluation: Option<V>,
-    pub pv_table: PVTable<M>
+    pub pv_table: PVTable<M>,
+    pub fail_high_counter: usize,
+    pub fail_high_on_first_counter: usize
 }
 
 impl<M: Move, V: Value> Default for SearchInfo<M, V> {
@@ -87,23 +89,41 @@ impl<M: Move, V: Value> Default for SearchInfo<M, V> {
             was_stopped: false,
             bestmove: Option::None,
             evaluation: Option::None,
-            pv_table: PVTable::new()
+            pv_table: PVTable::new(),
+            fail_high_counter: 0,
+            fail_high_on_first_counter: 0
         };
     }
 }
 
-#[derive(Clone)]
-pub struct SearchResult<M: Move> {
-    // todo: ponder
-    pub bestmove: M
+impl<V: Value, M: Move> SearchInfo<M, V> {
+
+    fn from_pv_table(pv_table: &PVTable<M>) -> Self {
+        return Self {
+            depth: Option::None,
+            time: Option::None,
+            nodes_searched: 0,
+            was_stopped: false,
+            bestmove: Option::None,
+            evaluation: Option::None,
+            pv_table: pv_table.clone(),
+            fail_high_counter: 0,
+            fail_high_on_first_counter: 0
+        }
+    }
+
+    fn partial_reset(&mut self) {
+        self.depth = Option::None;
+        self.time = Option::None;
+        self.was_stopped = false;
+    }
 }
 
-
-pub type Search<V, M, B> = fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M, V>>) -> SearchResult<M>;
+pub type Search<V, M, B> = fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M, V>>) -> SearchInfo<M, V>;
 
 macro_rules! implSearch {
     (<$V: ident, $B: ident, $M: ident>) => {
-        impl 'static + Sync + Send + Fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M, V>>) -> SearchResult<M>
+        impl 'static + Sync + Send + Fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M, V>>) -> SearchInfo<M, V>
     };
 }
 
@@ -125,7 +145,7 @@ impl fmt::Debug for SearchInstruction {
 
         println!("\nSearchInstructions:");
         maybe_write!(f, "searchmoves: {:?}", &self.searchmoves);
-        maybe_write!(f, "   infinite: {}", Option::Some(self.infinite));
+            writeln!(f, "   infinite: {}", self.infinite)?;
         maybe_write!(f, "      depth: {}", self.depth);
         maybe_write!(f, "   movetime: {}", self.movetime_in_ms);
         maybe_write!(f, "      wtime: {}", self.wtime_in_ms);
@@ -151,33 +171,31 @@ impl<M: Move, V: Value + ToString> fmt::Debug for SearchInfo<M, V> {
 
         // concat PV line into a single String (if there is any)
         let pv_line = self
-            .pv_table.get_pv()
+            .pv_table.get_pv_line()
             .iter()
             .map(|r#move| r#move.as_string())
             .collect::<Vec<_>>()
             .join(" ");
 
+        // calculate the quotient of fail highs on the first move, if possible
+        let fhf_quotient = if self.fail_high_counter != 0 {
+            Option::Some(self.fail_high_on_first_counter as f64 / self.fail_high_counter as f64)
+        } else {
+            Option::None
+        };
+
         println!("\nSearchInfo:");
-        maybe_write!(f, "depth:    {}", self.depth);
-        maybe_write!(f, "time:     {}", self.time);
-        maybe_write!(f, "nodes:    {}", Option::Some(self.nodes_searched));
-        maybe_write!(f, "score:    {}", score);
-        writeln!(f, "pv line:  {:?}", pv_line)?;
+        maybe_write!(f, "         depth: {}", self.depth);
+        maybe_write!(f, "          time: {}", self.time);
+            writeln!(f, "       pv line: {:?}", pv_line)?;
+        maybe_write!(f, "         score: {}", score);
+            writeln!(f, "         nodes: {}", self.nodes_searched)?;
+            writeln!(f, "    fail highs: {:?}", self.fail_high_counter)?;
+            writeln!(f, "f.h.s on first: {:?}", self.fail_high_on_first_counter)?;
+        maybe_write!(f, "  fhf-quotient: {:.3}", fhf_quotient);
         println!();
 
         return Ok(());
         
-    }
-}
-
-impl<M: Move> fmt::Debug for SearchResult<M> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-
-        println!("\nSearchResult:");
-        writeln!(f, "bestmove: {}", self.bestmove.as_string())?;
-        println!();
-
-        return Ok(());
-
     }
 }

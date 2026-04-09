@@ -1,17 +1,13 @@
 
-use std::{
-    sync::mpsc::{Receiver, Sender}, time::{Duration, SystemTime}
-};
+use std::sync::mpsc::Receiver;
 
 use crate::{
     board::{Board, Move},
     search::{
         evaluate_wrt_root,
-        Value, Status, Searchable, 
-        SearchInstruction, SearchInfo, SearchResult,
+        Value, Searchable, SearchInfo,
         generics::{Bool, False, True, Optimizer, Maximizer, Minimizer},
-    },
-    uci::Response
+    }
 };
 
 
@@ -20,7 +16,7 @@ pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
     depth: u8,
     stop_rx: &Receiver<()>,
     search_info: &mut SearchInfo<M, V>
-) -> Result<(Option<M>, V), ()> {
+) -> Result<(), ()> {
 
     // will be called with the correct (const) arguments to accomplish the search
     fn inner_minimax<
@@ -76,7 +72,7 @@ pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
         for r#move in legal_moves {
 
             // make move
-            board.make_move(r#move.clone());  // TODO: MAybe remove this clone by enforcing M: Copy?
+            board.make_move(r#move);
 
             // recursive call
             let child_evaluation = inner_minimax::<
@@ -119,7 +115,7 @@ pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
     }
 
     // manual dispatch into the right implementation of inner_minimax
-    let evaluation = match board.whites_turn() {
+    let _ = match board.whites_turn() {
         true  => inner_minimax::<Maximizer, True, V, M, B>(board, depth, 0, stop_rx, search_info),
         false => inner_minimax::<Minimizer, True, V, M, B>(board, depth, 0, stop_rx, search_info)
     };
@@ -129,7 +125,7 @@ pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
         return Err(());
     }
 
-    // return best move and its evaluation
-    return Ok((search_info.bestmove.clone(), evaluation));
+    // end search
+    return Ok(());
     
 }

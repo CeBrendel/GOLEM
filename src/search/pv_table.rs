@@ -1,7 +1,7 @@
 
 use crate::board::Move;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct PVTable<M: Move> {
     table: [[M; 64]; 64],
     lengths: [usize; 64]
@@ -35,8 +35,12 @@ impl<M: Move> PVTable<M> {
 
     }
 
-    pub fn get_pv(&self) -> &[M] {
-        &self.table[0][0..self.lengths[0]]
+    pub fn get_pv_line(&self) -> &[M] {
+        return &self.table[0][0..self.lengths[0]];
+    }
+
+    pub fn get_pv_move(&self) -> M {
+        return self.table[0][0];
     }
 
 }
