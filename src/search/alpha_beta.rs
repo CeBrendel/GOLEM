@@ -7,11 +7,12 @@ use crate::{
         evaluate_wrt_root,
         Value, Searchable, SearchInfo,
         generics::{Bool, False, True, Optimizer, Maximizer, Minimizer},
+        move_ordering::{MVVLVAScorer, MoveIterator}
     }
 };
 
 
-pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V>>(
+pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M>>(
     board: &mut B,
     depth: u8,
     stop_rx: &Receiver<()>,
@@ -24,7 +25,7 @@ pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V>>(
         IsEntry: Bool,  // whether this is the entrypoint of the recursion (only then we write to the move buffer)
         V: Value,
         M: Move,
-        B: Searchable<M, V>
+        B: Searchable<M, V> + MVVLVAScorer<M>
     >(
         board: &mut B,
         depth_left: u8,
@@ -49,9 +50,6 @@ pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V>>(
             return V::ZERO;
         }
 
-        // clear pv table for current depth
-        search_info.pv_table.clear_at(distance_to_root as usize);
-
         // increment nodes counter
         search_info.nodes_searched += 1;
 
@@ -68,6 +66,10 @@ pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V>>(
         if legal_moves.len() == 0 {
             return evaluate_wrt_root(board, distance_to_root);
         }
+
+        // but them into an iterator sorting them heuristically; afterwards clear pv table for current depth
+        let legal_moves = MoveIterator::from_vec(legal_moves, search_info, board);
+        search_info.pv_table.clear_at(distance_to_root as usize);
 
         // iterate over all moves and evaluate the resulting position via a recursive call
         let mut optimal_value: V = if O::IS_MAXIMIZER {V::MIN} else {V::MAX};

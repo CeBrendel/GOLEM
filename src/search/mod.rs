@@ -4,6 +4,8 @@ pub mod minimax;
 pub mod alpha_beta;
 pub mod generics;
 pub mod pv_table;
+pub mod transposition_table;
+pub mod move_ordering;
 
 
 use std::{

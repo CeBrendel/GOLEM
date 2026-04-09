@@ -3,8 +3,11 @@
 use std::str::FromStr;
 
 use crate::{
-    board::{Board, Move},
-    search::{Value, Status, Searchable}
+    board::{Piece, Move, Board},
+    search::{
+        Value, Status, Searchable,
+        move_ordering::MVVLVAScorer
+    }
 };
 
 use chess;
@@ -22,7 +25,7 @@ const SQUARES: [Square; 64] = [
     Square::A1, Square::B1, Square::C1, Square::D1, Square::E1, Square::F1, Square::G1, Square::H1
 ];
 
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WrappedMove {
     pub r#move: chess::ChessMove
 }
@@ -309,4 +312,73 @@ impl Searchable<WrappedMove, i32> for WrappedBoard {
 
     }
     
+}
+
+
+impl MVVLVAScorer<WrappedMove> for WrappedBoard {
+    fn is_capture(&self, r#move: WrappedMove) -> bool {
+
+        // get destination of move and check if there is a piece, if not check if it is the ep square
+        let dest = r#move.r#move.get_dest();
+
+        match self.board.piece_on(dest) {
+            Option::None    => {
+
+                // no piece on dest, but is it the ep-square?
+                match self.board.en_passant() {
+                    Option::None                    => {return false;},
+                    Option::Some(ep_square) => {
+
+                        let correct_square = ep_square == dest;
+
+                        let source = r#move.r#move.get_source();
+                        let piece = self.board.piece_on(source).expect("No piece on source of move!");
+                        let correct_piece = piece == chess::Piece::Pawn;
+
+                        return correct_square && correct_piece;
+                    }
+                }
+            },
+            Option::Some(_) => {return true;}
+        }
+
+    }
+
+    fn get_victim_of(&self, r#move: WrappedMove) -> Piece {
+        
+        // get destination of move and check if there is a piece, if not then it is the en passant square
+        let dest = r#move.r#move.get_dest();
+
+        return match self.board.piece_on(dest) {
+            Option::None               => Piece::Pawn,
+            Option::Some(piece) => {
+                return match piece {
+                    chess::Piece::Pawn   => Piece::Pawn,
+                    chess::Piece::Knight => Piece::Knight,
+                    chess::Piece::Bishop => Piece::Bishop,
+                    chess::Piece::Rook   => Piece::Rook,
+                    chess::Piece::Queen  => Piece::Queen,
+                    chess::Piece::King   => Piece::King
+                }   
+            }
+        };
+
+    }
+
+    fn get_attacker_of(&self, r#move: WrappedMove) -> Piece {
+
+        // get destination of move and check if there is a piece, if not then it is the en passant square
+        let source = r#move.r#move.get_source();
+
+        return match self.board.piece_on(source).expect("No piece on source of move!") {
+            chess::Piece::Pawn   => Piece::Pawn,
+            chess::Piece::Knight => Piece::Knight,
+            chess::Piece::Bishop => Piece::Bishop,
+            chess::Piece::Rook   => Piece::Rook,
+            chess::Piece::Queen  => Piece::Queen,
+            chess::Piece::King   => Piece::King
+        };
+
+    }
+
 }

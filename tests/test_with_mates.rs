@@ -3434,7 +3434,11 @@ Irina Zakurdjaeva vs Madona Bokuchava, Belgrade, 7/31/2013
 1. Qg7+ Kh5 2. g4+ Qxg4 3. Qxh7#
 ";
 
-fn read_and_test(str_of_mates: &str, ply_depth_to_mate: u8, search: IterableSearch<i32, WrappedMove, WrappedBoard>) {
+fn read_and_test(
+    str_of_mates: &str,
+    ply_depth_to_mate: u8,
+    search: IterableSearch<i32, WrappedMove, WrappedBoard>
+) {
 
     // a place in which to write all positions to test
     let mut fens_and_moves: Vec<(&str, &str)> = Vec::new();

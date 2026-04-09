@@ -3,7 +3,17 @@ pub mod wrapped_board;
 
 use std::fmt;
 
-pub trait Move: fmt::Debug + Clone + Copy + Default + Send + Sync + 'static {
+#[derive(Clone, Copy)]
+pub enum Piece {
+    Pawn = 0,
+    Knight,
+    Bishop,
+    Rook,
+    Queen,
+    King
+}
+
+pub trait Move: fmt::Debug + Clone + Copy + Default + PartialEq + Eq + Send + Sync + 'static {
     fn as_string(&self) -> String;
     fn from_algebraic(s: &str) -> Self;
 }
