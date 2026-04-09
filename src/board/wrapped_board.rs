@@ -251,7 +251,7 @@ impl Board<WrappedMove> for WrappedBoard {
 }
 
 impl Value for i32 {
-    const MIN: Self = i32::MIN;
+    const MIN: Self = i32::MIN + 1;  // we have to add 1 because -i32::MIN does not exist!
     const WHITE_IS_DEAD: Self = -30_000;
     const ZERO: Self = 0;
     const BLACK_IS_DEAD: Self = 30_000;
