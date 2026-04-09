@@ -104,7 +104,15 @@ pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V>>(
 
                 // if we are in the entrypoint to the main search, also remember the move and it evaluation
                 if IsEntry::VALUE {
-                    search_info.evaluation = Option::Some(optimal_value);
+
+                    // flip evaluation to be of the Optimizer's PoV
+                    let evaluation = if O::IS_MAXIMIZER {
+                        optimal_value
+                    } else {
+                        -optimal_value
+                    };
+
+                    search_info.evaluation = Option::Some(evaluation);
                     search_info.bestmove = Option::Some(r#move);
                 }
 

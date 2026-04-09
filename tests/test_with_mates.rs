@@ -3495,11 +3495,12 @@ fn read_and_test(str_of_mates: &str, ply_depth_to_mate: u8, search: IterableSear
         let bestmove_in_long_algebraic = bestmove.r#move.to_string();
         
         // get distance to mate
-        let distance_to_root = if board.whites_turn() {
-            <i32 as Value>::BLACK_IS_DEAD - evaluation
+        let mate_evaluation_pov = if board.whites_turn() {
+            <i32 as Value>::BLACK_IS_DEAD
         } else {
-            evaluation - <i32 as Value>::WHITE_IS_DEAD
+           - <i32 as Value>::WHITE_IS_DEAD
         };
+        let distance_to_root = mate_evaluation_pov - evaluation;
         
         println!("Found move: {} with evaluation {}.", found_move_in_long_algebraic, evaluation);
         println!("Depth of mate to root: {}.", distance_to_root);
