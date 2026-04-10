@@ -61,7 +61,7 @@ pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M>>(
 
         // get legal moves in current position
         let legal_moves = board.get_legal_moves();
-
+        
         // if there are no legal moves to make, simply return the evaluation of the board
         if legal_moves.len() == 0 {
             return evaluate_wrt_root(board, distance_to_root);
@@ -163,7 +163,7 @@ pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M>>(
     }
 
     // manual dispatch into the right implementation of inner_minimax
-    let _ = match board.whites_turn() {
+    match board.whites_turn() {
         true  => inner_alpha_beta::<Maximizer, True, V, M, B>(board, depth, 0, V::MIN, V::MAX, stop_rx, search_info),
         false => inner_alpha_beta::<Minimizer, True, V, M, B>(board, depth, 0, V::MIN, V::MAX, stop_rx, search_info)
     };

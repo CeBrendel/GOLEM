@@ -123,7 +123,7 @@ pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
     }
 
     // manual dispatch into the right implementation of inner_minimax
-    let _ = match board.whites_turn() {
+    match board.whites_turn() {
         true  => inner_minimax::<Maximizer, True, V, M, B>(board, depth, 0, stop_rx, search_info),
         false => inner_minimax::<Minimizer, True, V, M, B>(board, depth, 0, stop_rx, search_info)
     };
