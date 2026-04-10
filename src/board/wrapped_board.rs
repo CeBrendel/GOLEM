@@ -3,26 +3,27 @@
 use std::str::FromStr;
 
 use crate::{
-    board::{Piece, Move, Board},
+    board::{
+        File, Rank, Square,
+        Board, Move, Piece, ColoredPiece,
+        FILES, RANKS
+    },
     search::{
-        Value, Status, Searchable,
-        move_ordering::MVVLVAScorer
+        Searchable, Status, Value, move_ordering::MVVLVAScorer
     }
 };
 
 use chess;
-use chess::Square;
 
-
-const SQUARES: [Square; 64] = [
-    Square::A8, Square::B8, Square::C8, Square::D8, Square::E8, Square::F8, Square::G8, Square::H8,
-    Square::A7, Square::B7, Square::C7, Square::D7, Square::E7, Square::F7, Square::G7, Square::H7,
-    Square::A6, Square::B6, Square::C6, Square::D6, Square::E6, Square::F6, Square::G6, Square::H6,
-    Square::A5, Square::B5, Square::C5, Square::D5, Square::E5, Square::F5, Square::G5, Square::H5,
-    Square::A4, Square::B4, Square::C4, Square::D4, Square::E4, Square::F4, Square::G4, Square::H4,
-    Square::A3, Square::B3, Square::C3, Square::D3, Square::E3, Square::F3, Square::G3, Square::H3,
-    Square::A2, Square::B2, Square::C2, Square::D2, Square::E2, Square::F2, Square::G2, Square::H2,
-    Square::A1, Square::B1, Square::C1, Square::D1, Square::E1, Square::F1, Square::G1, Square::H1
+const SQUARES: [chess::Square; 64] = [
+    chess::Square::A8, chess::Square::B8, chess::Square::C8, chess::Square::D8, chess::Square::E8, chess::Square::F8, chess::Square::G8, chess::Square::H8,
+    chess::Square::A7, chess::Square::B7, chess::Square::C7, chess::Square::D7, chess::Square::E7, chess::Square::F7, chess::Square::G7, chess::Square::H7,
+    chess::Square::A6, chess::Square::B6, chess::Square::C6, chess::Square::D6, chess::Square::E6, chess::Square::F6, chess::Square::G6, chess::Square::H6,
+    chess::Square::A5, chess::Square::B5, chess::Square::C5, chess::Square::D5, chess::Square::E5, chess::Square::F5, chess::Square::G5, chess::Square::H5,
+    chess::Square::A4, chess::Square::B4, chess::Square::C4, chess::Square::D4, chess::Square::E4, chess::Square::F4, chess::Square::G4, chess::Square::H4,
+    chess::Square::A3, chess::Square::B3, chess::Square::C3, chess::Square::D3, chess::Square::E3, chess::Square::F3, chess::Square::G3, chess::Square::H3,
+    chess::Square::A2, chess::Square::B2, chess::Square::C2, chess::Square::D2, chess::Square::E2, chess::Square::F2, chess::Square::G2, chess::Square::H2,
+    chess::Square::A1, chess::Square::B1, chess::Square::C1, chess::Square::D1, chess::Square::E1, chess::Square::F1, chess::Square::G1, chess::Square::H1
 ];
 
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +91,69 @@ impl WrappedBoard {
 
         }
 
+    }
+
+    fn map_piece(piece: chess::Piece) -> Piece {
+        return match piece {
+            chess::Piece::Pawn   => Piece::Pawn,
+            chess::Piece::Knight => Piece::Knight,
+            chess::Piece::Bishop => Piece::Bishop,
+            chess::Piece::Rook   => Piece::Rook,
+            chess::Piece::Queen  => Piece::Queen,
+            chess::Piece::King   => Piece::King
+        };
+    }
+
+    fn file_from_own_file(file: File) -> chess::File {
+        return match file {
+            File::A => chess::File::A,
+            File::B => chess::File::B,
+            File::C => chess::File::C,
+            File::D => chess::File::D,
+            File::E => chess::File::E,
+            File::F => chess::File::F,
+            File::G => chess::File::G,
+            File::H => chess::File::H
+        }
+    }
+
+    fn own_file_from_file(file: chess::File) -> File {
+        return match file {
+            chess::File::A => File::A,
+            chess::File::B => File::B,
+            chess::File::C => File::C,
+            chess::File::D => File::D,
+            chess::File::E => File::E,
+            chess::File::F => File::F,
+            chess::File::G => File::G,
+            chess::File::H => File::H
+        }
+    }
+
+    fn rank_from_own_rank(rank: Rank) -> chess::Rank {
+        return match rank {
+            Rank::One   => chess::Rank::First,
+            Rank::Two   => chess::Rank::Second,
+            Rank::Three => chess::Rank::Third,
+            Rank::Four  => chess::Rank::Fourth,
+            Rank::Five  => chess::Rank::Fifth,
+            Rank::Six   => chess::Rank::Sixth,
+            Rank::Seven => chess::Rank::Seventh,
+            Rank::Eight => chess::Rank::Eighth
+        }
+    }
+
+    fn own_rank_from_rank(rank: chess::Rank) -> Rank {
+        return match rank {
+            chess::Rank::First   => Rank::One,
+            chess::Rank::Second  => Rank::Two,
+            chess::Rank::Third   => Rank::Three,
+            chess::Rank::Fourth  => Rank::Four,
+            chess::Rank::Fifth   => Rank::Five,
+            chess::Rank::Sixth   => Rank::Six,
+            chess::Rank::Seventh => Rank::Seven,
+            chess::Rank::Eighth  => Rank::Eight
+        }
     }
 
 }
@@ -248,7 +312,7 @@ impl Board<WrappedMove> for WrappedBoard {
     }
 
     fn visualize(&self) {
-        println!("{}", self.board);
+        vis_board(self);
     }
 
 }
@@ -291,7 +355,7 @@ impl Searchable<WrappedMove, i32> for WrappedBoard {
         return match self.board.status() {
             chess::BoardStatus::Ongoing   => Status::Ongoing,
             chess::BoardStatus::Stalemate => Status::Stalemate,
-            chess::BoardStatus::Checkmate => if self.whites_turn() {Status::WhiteIsDead} else {return Status::BlackIsDead}
+            chess::BoardStatus::Checkmate => if Searchable::whites_turn(self) {Status::WhiteIsDead} else {return Status::BlackIsDead}
         };
     }
 
@@ -302,7 +366,7 @@ impl Searchable<WrappedMove, i32> for WrappedBoard {
             chess::BoardStatus::Ongoing   => {return self.material_strength;},
             chess::BoardStatus::Stalemate => {return 0;},
             chess::BoardStatus::Checkmate => {
-                if self.whites_turn() {
+                if Searchable::whites_turn(self) {
                     return i32::WHITE_IS_DEAD
                 } else {
                     return i32::BLACK_IS_DEAD
@@ -351,16 +415,7 @@ impl MVVLVAScorer<WrappedMove> for WrappedBoard {
 
         return match self.board.piece_on(dest) {
             Option::None               => Piece::Pawn,
-            Option::Some(piece) => {
-                return match piece {
-                    chess::Piece::Pawn   => Piece::Pawn,
-                    chess::Piece::Knight => Piece::Knight,
-                    chess::Piece::Bishop => Piece::Bishop,
-                    chess::Piece::Rook   => Piece::Rook,
-                    chess::Piece::Queen  => Piece::Queen,
-                    chess::Piece::King   => Piece::King
-                }   
-            }
+            Option::Some(piece) => Self::map_piece(piece)
         };
 
     }
@@ -370,15 +425,163 @@ impl MVVLVAScorer<WrappedMove> for WrappedBoard {
         // get destination of move and check if there is a piece, if not then it is the en passant square
         let source = r#move.r#move.get_source();
 
-        return match self.board.piece_on(source).expect("No piece on source of move!") {
-            chess::Piece::Pawn   => Piece::Pawn,
-            chess::Piece::Knight => Piece::Knight,
-            chess::Piece::Bishop => Piece::Bishop,
-            chess::Piece::Rook   => Piece::Rook,
-            chess::Piece::Queen  => Piece::Queen,
-            chess::Piece::King   => Piece::King
-        };
+        return Self::map_piece(self.board.piece_on(source).expect("No piece on source of move!"));
 
     }
 
+}
+
+
+static RANK_CHARS: [char; 8]  = ['1', '2', '3', '4', '5', '6', '7', '8'];
+static FILE_CHARS: [char; 8]  = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+static EMPTY_SQUARE_CHAR: char = '.';
+static PIECE_CHARS: [char; 12] = ['P','N','B','R','Q','K', 'p','n','b','r','q','k'];  //['♙','♘','♗','♖','♕','♔', '♟','♞','♝','♜','♛','♚'];
+static PLAYER_CHARS: [char; 2]  = ['w', 'b'];
+
+
+pub trait Visualizable {
+    fn whites_turn(&self) -> bool;
+    fn piece_at(&self, square: Square) -> Option<ColoredPiece>;
+    fn en_passant_square(&self) -> Option<Square>;
+    fn zobrist_hash(&self) -> Option<u64>;
+    fn polykey(&self) -> Option<u64>;
+}
+
+fn get_repr_for_square(square: Square) -> String {
+    let (file, rank) = square;
+    return format!("{}{}", FILE_CHARS[file as usize], RANK_CHARS[rank as usize]);
+}
+
+pub fn vis_board<B: Visualizable>(board: &B) {
+
+    let mut repr: String = String::new();
+
+    repr += "\n    ";
+    for file in FILES {
+        repr += &format!("{} ", FILE_CHARS[file as usize]);
+    }
+
+    repr += "\n    ";
+    for _ in 0..7 {
+        repr += "__";
+    }
+    repr += "_";
+
+    repr += "\n";
+
+    for rank in RANKS.into_iter().rev() {
+
+        repr += &format!("{}  |", RANK_CHARS[rank as usize]);
+
+        for file in FILES {
+
+            // get char for piece on that square (no pice is explicitly covered)
+            let maybe_piece_char = match board.piece_at((file, rank)) {
+                Option::None                      => EMPTY_SQUARE_CHAR,
+                Option::Some(piece) => PIECE_CHARS[piece as usize]
+            };
+
+            repr += &format!("{maybe_piece_char} ");
+        }
+        repr += "\n";
+    }
+    
+    repr += "\n";
+
+    // show which player's turn it is
+    let player_idx = if board.whites_turn() {0} else {1};
+    repr += &format!("side to move: {}", PLAYER_CHARS[player_idx]);
+    
+    // show en passant square (if any)
+    let maybe_square_repr = match board.en_passant_square() {
+        Option::None                       => "-",
+        Option::Some(square) => &get_repr_for_square(square)
+    };
+    repr += &format!("\nen passent on: {maybe_square_repr}");
+
+    // // show castling permissions
+    // let K_perm;
+    // let Q_perm;
+    // let k_perm;
+    // let q_perm;
+    // // if (board.castle_perm & CastlingRights::WkR as u8) != 0 {'K'} else {'-'},
+    // // if (board.castle_perm & CastlingRights::WqR as u8) != 0 {'Q'} else {'-'},
+    // // if (board.castle_perm & CastlingRights::BkR as u8) != 0 {'k'} else {'-'},
+    // // if (board.castle_perm & CastlingRights::BqR as u8) != 0 {'q'} else {'-'},
+    // repr += &format!("\ncastle permissions: {K_perm}{Q_perm}{k_perm}{q_perm}");
+
+    // maybe show Zobrist hash
+    match board.zobrist_hash() {
+        Option::None            => {},
+        Option::Some(hash) => {repr += &format!("\nboard key: {hash:x?}");}
+    }
+    
+    // maybe show polykey
+    match board.polykey() {
+        Option::None           => {},
+        Option::Some(key) => {repr += &format!("\npoly key: {key:x?}");}
+    }
+
+    repr += &format!("\n\n");
+
+    println!("{repr}");
+
+}
+
+
+impl Visualizable for WrappedBoard {
+
+    fn whites_turn(&self) -> bool {
+        return Searchable::whites_turn(self);
+    }
+
+    fn piece_at(&self, square: super::Square) -> Option<super::ColoredPiece> {
+
+        let (file, rank) = square;
+        let file = Self::file_from_own_file(file);
+        let rank = Self::rank_from_own_rank(rank);
+        let square = chess::Square::make_square(rank, file);
+
+        let piece = match self.board.piece_on(square) {
+            Option::None               => return Option::None,
+            Option::Some(piece) => piece
+        };
+        
+        let color = self.board.color_on(square).unwrap();
+
+        let parsed_piece = match (piece, color) {
+            (chess::Piece::Pawn,   chess::Color::White) => super::ColoredPiece::WhitePawn,
+            (chess::Piece::Knight, chess::Color::White) => super::ColoredPiece::WhiteKnight,
+            (chess::Piece::Bishop, chess::Color::White) => super::ColoredPiece::WhiteBishop,
+            (chess::Piece::Rook,   chess::Color::White) => super::ColoredPiece::WhiteRook,
+            (chess::Piece::Queen,  chess::Color::White) => super::ColoredPiece::WhiteQueen,
+            (chess::Piece::King,   chess::Color::White) => super::ColoredPiece::WhiteKing,
+            (chess::Piece::Pawn,   chess::Color::Black) => super::ColoredPiece::BlackPawn,
+            (chess::Piece::Knight, chess::Color::Black) => super::ColoredPiece::BlackKnight,
+            (chess::Piece::Bishop, chess::Color::Black) => super::ColoredPiece::BlackBishop,
+            (chess::Piece::Rook,   chess::Color::Black) => super::ColoredPiece::BlackRook,
+            (chess::Piece::Queen,  chess::Color::Black) => super::ColoredPiece::BlackQueen,
+            (chess::Piece::King,   chess::Color::Black) => super::ColoredPiece::BlackKing,
+        };
+
+        return Option::Some(parsed_piece);
+
+    }
+
+    fn en_passant_square(&self) -> Option<super::Square> {
+        return match self.board.en_passant() {
+            Option::None                 => Option::None,
+            Option::Some(square) => {
+                let file = Self::own_file_from_file(square.get_file());
+                let rank = Self::own_rank_from_rank(square.get_rank());
+                Option::Some((file, rank))
+            }
+        }
+    }
+    fn zobrist_hash(&self) -> Option<u64> {
+        return Option::None;
+    }
+    fn polykey(&self) -> Option<u64> {
+        return Option::None;
+    }
 }
