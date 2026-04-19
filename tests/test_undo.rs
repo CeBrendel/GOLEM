@@ -7,7 +7,11 @@ use std::sync::mpsc;
 
 use golem::{
     board::{Board, wrapped_board::WrappedBoard},
-    search::{SearchInfo, minimax::minimax}
+    search::{
+        SearchInfo,
+        minimax::minimax,
+        transposition_table::TransTable
+    }
 };
 
 
@@ -17,6 +21,9 @@ fn test_undo() {
     // read fens
     let fens = read_fens();
     let n_fens = fens.len();
+
+    // make transposition table
+    let mut transposition_table = TransTable::new();
 
     // loop through (some) fens
     for (idx, fen) in fens.iter().enumerate() {
@@ -36,7 +43,7 @@ fn test_undo() {
         //, do a shallow search (lots of making and unmaking of moves)
         let (_, stop_rx) = mpsc::channel::<()>();
         let mut search_info = SearchInfo::default();
-        let _ = minimax(&mut board, 2, &stop_rx, &mut search_info);
+        minimax(&mut board, 2, &mut transposition_table, &stop_rx, &mut search_info).expect("Search failed!");
 
         // assert that board agrees with record
         assert_eq!(board, record);
