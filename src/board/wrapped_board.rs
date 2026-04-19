@@ -1,6 +1,6 @@
 
 
-use std::str::FromStr;
+use std::{hash::Hash, str::FromStr};
 
 use crate::{
     board::{
@@ -9,7 +9,7 @@ use crate::{
         FILES, RANKS
     },
     search::{
-        Searchable, Status, Value, move_ordering::MVVLVAScorer
+        Searchable, Status, Value, move_ordering::MVVLVAScorer, transposition_table::Hashable
     }
 };
 
@@ -319,9 +319,9 @@ impl Board<WrappedMove> for WrappedBoard {
 
 impl Value for i32 {
     const MIN: Self = i32::MIN + 1;  // we have to add 1 because -i32::MIN does not exist!
-    const WHITE_IS_DEAD: Self = -30_000;
     const ZERO: Self = 0;
-    const BLACK_IS_DEAD: Self = 30_000;
+    const MATE_TRHESHOLD: Self = 16_384;
+    const MATE: Self = 30_000;
     const MAX: Self = i32::MAX;
 }
 
@@ -355,27 +355,29 @@ impl Searchable<WrappedMove, i32> for WrappedBoard {
         return match self.board.status() {
             chess::BoardStatus::Ongoing   => Status::Ongoing,
             chess::BoardStatus::Stalemate => Status::Stalemate,
-            chess::BoardStatus::Checkmate => if Searchable::whites_turn(self) {Status::WhiteIsDead} else {return Status::BlackIsDead}
+            chess::BoardStatus::Checkmate => Status::Checkmate
         };
     }
 
     fn evaluate(&self) -> i32 {
 
+        // offset to introduce some noise to thhe evaluation
+        let hash = self.board.get_hash();
+        let last_bit_of_hash = hash & 1;
+        let some_other_bits = hash & 0b1110;
+        let sign = if last_bit_of_hash == 1 {1} else {-1};
+        let body = some_other_bits as i32;
+        let offset = sign * body;
+
         // check if we are in a stale- or checkmate
-        match self.board.status() {
-            chess::BoardStatus::Ongoing   => {return self.material_strength;},
-            chess::BoardStatus::Stalemate => {return 0;},
-            chess::BoardStatus::Checkmate => {
-                if Searchable::whites_turn(self) {
-                    return i32::WHITE_IS_DEAD
-                } else {
-                    return i32::BLACK_IS_DEAD
-                }
-            }
+        return match self.board.status() {
+            chess::BoardStatus::Ongoing   => self.material_strength + offset,
+            chess::BoardStatus::Stalemate => 0,
+            chess::BoardStatus::Checkmate => -i32::MATE
         }
 
     }
-    
+
 }
 
 
@@ -583,5 +585,11 @@ impl Visualizable for WrappedBoard {
     }
     fn polykey(&self) -> Option<u64> {
         return Option::None;
+    }
+}
+
+impl Hashable<i32, WrappedMove> for WrappedBoard {
+    fn get_zobrist_hash(&self) -> usize {
+        return self.board.get_hash() as usize;
     }
 }

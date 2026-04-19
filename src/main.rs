@@ -29,7 +29,7 @@ enum KindOfSearch {
 }
 
 const BOARD: KindOfBoard = KindOfBoard::Wrapped;
-const SEARCH: KindOfSearch = KindOfSearch::AlphaBeta;
+const SEARCH: KindOfSearch = KindOfSearch::Negamax;
 
 pub fn main() {
 

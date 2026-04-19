@@ -67,7 +67,12 @@ pub struct MoveIterator<M: Move> {
 
 impl<M: Move> MoveIterator<M> {
 
-    pub fn from_vec<V: Value, B: MVVLVAScorer<M>>(moves: Vec<M>, search_info: &SearchInfo<M, V>, board: &B) -> Self {
+    pub fn from_vec<V: Value, B: MVVLVAScorer<M>>(
+        moves: Vec<M>,
+        search_info: &SearchInfo<M, V>,
+        board: &B,
+        maybe_transposition_move: Option<M>
+    ) -> Self {
 
         let n_moves = moves.len();
         

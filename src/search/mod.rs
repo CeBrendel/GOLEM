@@ -17,25 +17,58 @@ use std::{
 };
 
 use crate::{
-    uci::Response,
-    board::{Move, Board},
-    search::pv_table::PVTable
+    board::{Board, Move},
+    search::{
+        pv_table::PVTable,
+        transposition_table::TransTable
+    },
+    uci::Response
 };
 
-
-pub trait Value: Eq + PartialOrd + Clone + Copy + From<u8> + Add<Self, Output=Self> + Sub<Self, Output=Self> + Neg<Output=Self> + ToString + Send + 'static {
-    const MIN: Self;
-    const WHITE_IS_DEAD: Self;
-    const ZERO: Self;
-    const BLACK_IS_DEAD: Self;
-    const MAX: Self;
+#[derive(Default, Clone, Copy)]
+pub enum Status {
+    #[default]Ongoing,
+    Stalemate,
+    Checkmate
 }
 
-pub enum Status {
-    Ongoing,
-    Stalemate,
-    WhiteIsDead,
-    BlackIsDead
+pub trait Value: fmt::Debug + Default + Eq + PartialOrd + Clone + Copy + From<u8> + Add<Self, Output=Self> + Sub<Self, Output=Self> + Neg<Output=Self> + ToString + Send + 'static {
+    const MIN: Self;
+    const ZERO: Self;
+    const MATE_TRHESHOLD: Self;
+    const MATE: Self;
+    const MAX: Self;
+
+    fn adjust_if_mate(self, status: Status, distance_to_root: u8) -> Self {
+        return match status {
+            Status::Checkmate => -Self::MATE + Self::from(distance_to_root),
+            Status::Stalemate => self,
+            Status::Ongoing   => self
+        }
+    }
+
+    fn make_relative_for_storing(mut self, distance_to_root: u8) -> Self {
+        
+        if self > Self::MATE_TRHESHOLD {
+            self = self + Self::from(distance_to_root);
+        } else if self < -Self::MATE_TRHESHOLD {
+            self = self - Self::from(distance_to_root);
+        }
+
+        return self;
+    }
+
+    fn make_absolute_for_probing(mut self, distance_to_root: u8) -> Self {
+
+        if self > Self::MATE_TRHESHOLD {
+            self = self - Self::from(distance_to_root);
+        } else if self < -Self::MATE_TRHESHOLD {
+            self = self + Self::from(distance_to_root);
+        }
+
+        return self;
+    }
+    
 }
 
 pub trait Searchable<M: Move, V: Value>: Board<M> {
@@ -48,11 +81,7 @@ pub trait Searchable<M: Move, V: Value>: Board<M> {
 
 
 pub fn evaluate_wrt_root<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(board: &mut B, distance_to_root: u8) -> V {
-    return match board.status() {
-        Status::WhiteIsDead => board.evaluate() + V::from(distance_to_root),
-        Status::BlackIsDead => board.evaluate() - V::from(distance_to_root),
-        _                   => board.evaluate(),
-    };
+    return board.evaluate().adjust_if_mate(board.status(), distance_to_root);
 }
 
 
@@ -81,7 +110,9 @@ pub struct SearchInfo<M: Move, V: Value> {
     pub evaluation: Option<V>,
     pub pv_table: PVTable<M>,
     pub fail_high_counter: usize,
-    pub fail_high_on_first_counter: usize
+    pub fail_high_on_first_counter: usize,
+    pub transposition_hits: usize,
+    pub transposition_near_hits: usize
 }
 
 impl<M: Move, V: Value> Default for SearchInfo<M, V> {
@@ -95,7 +126,9 @@ impl<M: Move, V: Value> Default for SearchInfo<M, V> {
             evaluation: Option::None,
             pv_table: PVTable::new(),
             fail_high_counter: 0,
-            fail_high_on_first_counter: 0
+            fail_high_on_first_counter: 0,
+            transposition_hits: 0,
+            transposition_near_hits: 0
         };
     }
 }
@@ -112,7 +145,9 @@ impl<V: Value, M: Move> SearchInfo<M, V> {
             evaluation: Option::None,
             pv_table: pv_table.clone(),
             fail_high_counter: 0,
-            fail_high_on_first_counter: 0
+            fail_high_on_first_counter: 0,
+            transposition_hits: 0,
+            transposition_near_hits: 0
         }
     }
 
@@ -123,11 +158,24 @@ impl<V: Value, M: Move> SearchInfo<M, V> {
     }
 }
 
-pub type Search<V, M, B> = fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M, V>>) -> SearchInfo<M, V>;
+pub type StopSignalSender = Sender<()>;
+pub type StopSignalReceiver = Receiver<()>;
+pub type WriteRequestSender<M, V> = Sender<Response<M, V>>;
+pub type WriteRequestReceiver<M, V> = Receiver<Response<M, V>>;
+
+pub type Search<V, M, B> = fn(
+    &mut B,
+    SearchInstruction,
+    &mut TransTable<V, M>,
+    &StopSignalReceiver,
+    &WriteRequestSender<M, V>
+) -> SearchInfo<M, V>;
 
 macro_rules! implSearch {
     (<$V: ident, $B: ident, $M: ident>) => {
-        impl 'static + Sync + Send + Fn(&mut B, SearchInstruction, &Receiver<()>, &Sender<Response<M, V>>) -> SearchInfo<M, V>
+        impl 'static + Sync + Send + Fn(
+            &mut B, SearchInstruction, &mut TransTable<V, M>, &StopSignalReceiver, &WriteRequestSender<M, V>
+        ) -> SearchInfo<M, V>
     };
 }
 
@@ -189,14 +237,16 @@ impl<M: Move, V: Value + ToString> fmt::Debug for SearchInfo<M, V> {
         };
 
         println!("\nSearchInfo:");
-        maybe_write!(f, "         depth: {}", self.depth);
-        maybe_write!(f, "          time: {}", self.time);
-            writeln!(f, "       pv line: {:?}", pv_line)?;
-        maybe_write!(f, "         score: {}", score);
-            writeln!(f, "         nodes: {}", self.nodes_searched)?;
-            writeln!(f, "    fail highs: {:?}", self.fail_high_counter)?;
-            writeln!(f, "f.h.s on first: {:?}", self.fail_high_on_first_counter)?;
-        maybe_write!(f, "  fhf-quotient: {:.3}", fhf_quotient);
+        maybe_write!(f, "           depth: {}", self.depth);
+        maybe_write!(f, "            time: {}", self.time);
+            writeln!(f, "         pv line: {:?}", pv_line)?;
+        maybe_write!(f, "           score: {}", score);
+            writeln!(f, "           nodes: {}", self.nodes_searched)?;
+            writeln!(f, "      fail highs: {:?}", self.fail_high_counter)?;
+            writeln!(f, "  f.h.s on first: {:?}", self.fail_high_on_first_counter)?;
+        maybe_write!(f, "    fhf-quotient: {:.3}", fhf_quotient);
+            writeln!(f, "     trans. hits: {:?}", self.transposition_hits)?;
+            writeln!(f, "trans. near hits: {:?}", self.transposition_near_hits)?;
         println!();
 
         return Ok(());

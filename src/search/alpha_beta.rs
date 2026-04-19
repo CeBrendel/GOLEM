@@ -4,10 +4,7 @@ use std::sync::mpsc::Receiver;
 use crate::{
     board::Move,
     search::{
-        evaluate_wrt_root,
-        Value, Searchable, SearchInfo,
-        generics::{Bool, False, True, Optimizer, Maximizer, Minimizer},
-        move_ordering::{MVVLVAScorer, MoveIterator}
+        SearchInfo, Searchable, Value, evaluate_wrt_root, generics::{Bool, False, Maximizer, Minimizer, Optimizer, True}, move_ordering::{MVVLVAScorer, MoveIterator}, transposition_table::TransTable
     }
 };
 
@@ -15,6 +12,7 @@ use crate::{
 pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M>>(
     board: &mut B,
     depth: u8,
+    _transposition_table: &mut TransTable<V, M>,
     stop_rx: &Receiver<()>,
     search_info: &mut SearchInfo<M, V>
 ) -> Result<(), ()> {
@@ -32,6 +30,7 @@ pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M>>(
         distance_to_root: u8,
         mut alpha: V,
         mut beta: V,
+        _transposition_table: &mut TransTable<V, M>,
         stop_rx: &Receiver<()>,
         search_info: &mut SearchInfo<M, V>
     ) -> V {
@@ -56,7 +55,14 @@ pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M>>(
         // base case of the recursion
         // TODO: If we are in check, we should increase depth anyways!
         if depth_left == 0 {
-            return evaluate_wrt_root(board, distance_to_root);
+
+            // evaluation is PoV, so we need to flip it in case that we are currently minimizing
+            if O::IS_MAXIMIZER {
+                return evaluate_wrt_root(board, distance_to_root);
+            } else {
+                return -evaluate_wrt_root(board, distance_to_root);
+            }
+
         }
 
         // get legal moves in current position
@@ -64,11 +70,18 @@ pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M>>(
         
         // if there are no legal moves to make, simply return the evaluation of the board
         if legal_moves.len() == 0 {
-            return evaluate_wrt_root(board, distance_to_root);
+
+            // evaluation is PoV, so we need to flip it in case that we are currently minimizing
+            if O::IS_MAXIMIZER {
+                return evaluate_wrt_root(board, distance_to_root);
+            } else {
+                return -evaluate_wrt_root(board, distance_to_root);
+            }
+            
         }
 
         // but them into an iterator sorting them heuristically; afterwards clear pv table for current depth
-        let legal_moves = MoveIterator::from_vec(legal_moves, search_info, board);
+        let legal_moves = MoveIterator::from_vec(legal_moves, search_info, board, Option::None);
         search_info.pv_table.clear_at(distance_to_root as usize);
 
         // iterate over all moves and evaluate the resulting position via a recursive call
@@ -90,6 +103,7 @@ pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M>>(
                 distance_to_root + 1, // search one depth durther from the root
                 alpha,
                 beta,
+                _transposition_table,
                 stop_rx,
                 search_info
             );
@@ -163,10 +177,12 @@ pub fn alpha_beta<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M>>(
     }
 
     // manual dispatch into the right implementation of inner_minimax
-    match board.whites_turn() {
-        true  => inner_alpha_beta::<Maximizer, True, V, M, B>(board, depth, 0, V::MIN, V::MAX, stop_rx, search_info),
-        false => inner_alpha_beta::<Minimizer, True, V, M, B>(board, depth, 0, V::MIN, V::MAX, stop_rx, search_info)
-    };
+    (match board.whites_turn() {
+        true  => inner_alpha_beta::<Maximizer, True, V, M, B>,
+        false => inner_alpha_beta::<Minimizer, True, V, M, B>
+    })(
+        board, depth, 0, V::MIN, V::MAX, _transposition_table, stop_rx, search_info
+    );
 
     // if search was stopped early, return an Err
     if search_info.was_stopped {

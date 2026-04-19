@@ -3,18 +3,20 @@
 mod text_parsing;
 
 use crate::{
-    board::{Move, Board},
-    search::{Value, SearchInstruction, SearchInfo, implSearch},
-    uci::text_parsing::{pop_first, parse_next_block_as, collect_blocks_until_next_keyword_or_end}
+    board::{Board, Move},
+    search::{
+        SearchInfo, SearchInstruction, Value,
+        StopSignalReceiver, WriteRequestSender,
+        implSearch,
+        transposition_table::{TT_MEMORY_IN_BYTES, TransTable}
+    },
+    uci::text_parsing::{collect_blocks_until_next_keyword_or_end, parse_next_block_as, pop_first}
 };
 
 use std::{
-    thread,
-    thread::JoinHandle,
     sync::{
-        Arc, Mutex,
-        mpsc::{channel, Sender, Receiver}
-    }
+        Arc, Mutex, atomic::{AtomicBool, Ordering}, mpsc::{Receiver, Sender, channel}
+    }, thread::{self, JoinHandle}, time::Duration
 };
 
 #[derive(Clone)]
@@ -59,9 +61,26 @@ fn emit_uci_response() {
     println!("");
 }
 
-fn emit_readyok() {
+fn emit_readyok(trans_table_is_init: &Arc<AtomicBool>) {
+
+    // wait for transposition table to initialize
+    let sleep_duration = Duration::from_millis(100);
+    loop {
+
+        // if transposition table is initialized, break loop
+        if trans_table_is_init.load(Ordering::Relaxed) {
+            break
+        }
+
+        // if transposition table is not initialized, wait a bit
+        thread::sleep(sleep_duration);
+
+    }
+
+    // emit readyok
     println!("readyok");
     println!("");
+
 }
 
 fn emit_search_info<M: Move, V: Value>(search_info: SearchInfo<M, V>) {
@@ -242,7 +261,9 @@ fn spawn_parsing_thread<V: Value, M: Move, B: Board<M>>(
     stop_tx: Sender<()>,
     quit_tx: Sender<()>
 ) -> JoinHandle<()> {
-    return thread::spawn(move || {
+    return thread::Builder::new()
+        .name("Parsing".to_string())
+        .spawn(move || {
 
         // this thread is the only thread that listens and writes to stdin/stdout
         let stdin = std::io::stdin();
@@ -268,13 +289,16 @@ fn spawn_parsing_thread<V: Value, M: Move, B: Board<M>>(
 
         }
 
-    });
+    }).expect("Failed to spawn Parsing thread!");
 }
 
 fn spawn_stdout_writer<V: Value, M: Move>(
-    write_request_rx: Receiver<Response<M, V>>
+    write_request_rx: Receiver<Response<M, V>>,
+    trans_table_is_init: Arc<AtomicBool>
 ) -> JoinHandle<()> {
-    return thread::spawn(move || {
+    return thread::Builder::new()
+        .name("Writer".to_string())
+        .spawn(move || {
         
         // repeatedly listen for messages in the channel
         loop {
@@ -288,14 +312,14 @@ fn spawn_stdout_writer<V: Value, M: Move>(
             // handle message
             match message {
                 Response::UciResponse                       => emit_uci_response(),
-                Response::ReadyOk                           => emit_readyok(),
+                Response::ReadyOk                           => emit_readyok(&trans_table_is_init),
                 Response::Info(info)      => emit_search_info(info),
                 Response::Bestmove(result) => emit_bestmove(result),
             }
 
         }
 
-    });
+    }).expect("Failed to spawn Writer thread!");
 }
 
 fn spawn_search_thread<V: Value, M: Move, B: Board<M>>(
@@ -303,9 +327,17 @@ fn spawn_search_thread<V: Value, M: Move, B: Board<M>>(
     search_instruction_rx: Receiver<SearchInstruction>,
     stop_rx: Receiver<()>,
     write_request_tx: Sender<Response<M, V>>,
+    trans_table_is_init: Arc::<AtomicBool>,
     search: implSearch!(<V, M, B>)
 ) -> JoinHandle<()> {
-    return thread::spawn(move || {
+    return thread::Builder::new()
+        .name("Search".to_string())
+        .spawn(move || {
+
+        // initialize transposition table
+        let mut transposition_table = TransTable::new();
+        println!("TT is init!");
+        trans_table_is_init.store(true, Ordering::Relaxed);
 
         // repeatedly listen for search instructions
         loop {
@@ -323,7 +355,13 @@ fn spawn_search_thread<V: Value, M: Move, B: Board<M>>(
             clear_channel(&stop_rx);
 
             // do the search
-            let search_info = search(&mut locked_board, search_instructions, &stop_rx, &write_request_tx);
+            let search_info = search(
+                &mut locked_board,
+                search_instructions,
+                &mut transposition_table,
+                &stop_rx,
+                &write_request_tx
+            );
         
             // get bestmove and send it
             let bestmove = search_info.bestmove.expect("Search did not return a bestmove!");
@@ -331,7 +369,7 @@ fn spawn_search_thread<V: Value, M: Move, B: Board<M>>(
 
         }
 
-    });
+    }).expect("Failed to spawn Search thread!");
 }
 
 pub fn uci_loop<V: Value, M: Move, B: Board<M>>(search: implSearch!(<V, M, B>)) where B: Default {
@@ -347,6 +385,10 @@ pub fn uci_loop<V: Value, M: Move, B: Board<M>>(search: implSearch!(<V, M, B>)) 
     let (quit_tx, quit_rx) = channel::<()>();
     let (write_request_tx, write_request_rx) = channel::<Response<M, V>>();
 
+    // for communication between search and write thread, value can be read repeatedly
+    let trans_table_is_init_signal_for_search_thread =Arc::new(AtomicBool::new(false));
+    let trans_table_is_init_signal_for_writer_thread =Arc::clone(&trans_table_is_init_signal_for_search_thread);
+
     // make multiple Senders for the write request channel
     let write_request_tx_for_parsing_thread = write_request_tx.clone();
     let write_request_tx_for_search_thread = write_request_tx;
@@ -361,7 +403,10 @@ pub fn uci_loop<V: Value, M: Move, B: Board<M>>(search: implSearch!(<V, M, B>)) 
     );
 
     // spawn thread for reading stdout
-    spawn_stdout_writer(write_request_rx);
+    spawn_stdout_writer(
+        write_request_rx,
+        trans_table_is_init_signal_for_writer_thread
+    );
 
     // spawn search thread
     spawn_search_thread(
@@ -369,6 +414,7 @@ pub fn uci_loop<V: Value, M: Move, B: Board<M>>(search: implSearch!(<V, M, B>)) 
         search_instruction_rx,
         stop_rx,
         write_request_tx_for_search_thread,
+        trans_table_is_init_signal_for_search_thread,
         search
     );
 

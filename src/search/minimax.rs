@@ -4,9 +4,7 @@ use std::sync::mpsc::Receiver;
 use crate::{
     board::{Board, Move},
     search::{
-        evaluate_wrt_root,
-        Value, Searchable, SearchInfo,
-        generics::{Bool, False, True, Optimizer, Maximizer, Minimizer},
+        SearchInfo, Searchable, Value, evaluate_wrt_root, generics::{Bool, False, Maximizer, Minimizer, Optimizer, True}, transposition_table::{self, TransTable}
     }
 };
 
@@ -14,6 +12,7 @@ use crate::{
 pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
     board: &mut B,
     depth: u8,
+    _transposition_table: &mut TransTable<V, M>,
     stop_rx: &Receiver<()>,
     search_info: &mut SearchInfo<M, V>
 ) -> Result<(), ()> {
@@ -29,6 +28,7 @@ pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
         board: &mut B,
         depth_left: u8,
         distance_to_root: u8,
+        _transposition_table: &mut TransTable<V, M>,
         stop_rx: &Receiver<()>,
         search_info: &mut SearchInfo<M, V>
     ) -> V {
@@ -56,7 +56,14 @@ pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
         // base case of the recursion
         // TODO: If we are in check, we should increase depth anyways!
         if depth_left == 0 {
-            return evaluate_wrt_root(board, distance_to_root);
+            
+            // evaluation is PoV, so we need to flip it in case that we are currently minimizing
+            if O::IS_MAXIMIZER {
+                return evaluate_wrt_root(board, distance_to_root);
+            } else {
+                return -evaluate_wrt_root(board, distance_to_root);
+            }
+            
         }
 
         // get legal moves in current position
@@ -64,7 +71,14 @@ pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
 
         // if there are no legal moves to make, simply return the evaluation of the board
         if legal_moves.len() == 0 {
-            return evaluate_wrt_root(board, distance_to_root);
+
+            // evaluation is PoV, so we need to flip it in case that we are currently minimizing
+            if O::IS_MAXIMIZER {
+                return evaluate_wrt_root(board, distance_to_root);
+            } else {
+                return -evaluate_wrt_root(board, distance_to_root);
+            }
+
         }
 
         // iterate over all moves and evaluate the resulting position via a recursive call
@@ -82,7 +96,8 @@ pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
             >(
                 board,
                 depth_left - 1,  // search one depth less
-                distance_to_root + 1, // search one depth durther from the root
+                distance_to_root + 1, // search one depth durther from the root,
+                _transposition_table,
                 stop_rx,
                 search_info
             );
@@ -123,10 +138,12 @@ pub fn minimax<V: Value, M: Move, B: Board<M> + Searchable<M, V>>(
     }
 
     // manual dispatch into the right implementation of inner_minimax
-    match board.whites_turn() {
-        true  => inner_minimax::<Maximizer, True, V, M, B>(board, depth, 0, stop_rx, search_info),
-        false => inner_minimax::<Minimizer, True, V, M, B>(board, depth, 0, stop_rx, search_info)
-    };
+    (match board.whites_turn() {
+        true  => inner_minimax::<Maximizer, True, V, M, B>,
+        false => inner_minimax::<Minimizer, True, V, M, B>
+    })(
+        board, depth, 0, _transposition_table, stop_rx, search_info
+    );
 
     // if search was stopped early, return an Err
     if search_info.was_stopped {

@@ -4,19 +4,21 @@ use std::{sync::mpsc::{Receiver, Sender}, time::Instant};
 use crate::{
     board::Move,
     search::{
-        SearchInstruction, SearchInfo,
-        Value, Searchable, implSearch
+        SearchInfo, SearchInstruction, Searchable, StopSignalReceiver, Value, WriteRequestSender,
+        implSearch,
+        transposition_table::TransTable
     },
     uci::Response
 };
 
 
-pub type IterableSearch<V, M, B> = fn(&mut B, u8, &Receiver<()>, &mut SearchInfo<M, V>) -> Result<(), ()>;
+pub type IterableSearch<V, M, B> = fn(&mut B, u8, &mut TransTable<V, M>, &StopSignalReceiver, &mut SearchInfo<M, V>) -> Result<(), ()>;
 
 
 fn inner_iterative_deepening<V: Value, M: Move, B: Searchable<M, V>>(
     board: &mut B,
     search_instruction: SearchInstruction,
+    transposition_table: &mut TransTable<V, M>,
     stop_rx: &Receiver<()>,
     write_request_tx: &Sender<Response<M, V>>,
     iterable_search: IterableSearch<V, M, B>
@@ -47,7 +49,7 @@ fn inner_iterative_deepening<V: Value, M: Move, B: Searchable<M, V>>(
         let now = Instant::now();
 
         // do search to the current depth
-        match iterable_search(board, depth, stop_rx, &mut search_info) {
+        match iterable_search(board, depth, transposition_table, stop_rx, &mut search_info) {
             Err(_) => break,  // is the search was stopped and returned an Err, break the loop
             Ok(_)  => {}
         };
@@ -77,10 +79,18 @@ pub fn iterative_deepening<V: Value, M: Move, B: Searchable<M, V>>(
     let partial_iterative_deepening = move |
         board: &mut B,
         search_instruction: SearchInstruction,
+        transposition_table: &mut TransTable<V, M>,
         stop_rx: &Receiver<()>,
         write_request_tx: &Sender<Response<M, V>>,
     | {
-        return inner_iterative_deepening(board, search_instruction, stop_rx, write_request_tx, iterable_search);
+        return inner_iterative_deepening(
+            board,
+            search_instruction,
+            transposition_table,
+            stop_rx,
+            write_request_tx,
+            iterable_search
+        );
     };
 
     return partial_iterative_deepening;
