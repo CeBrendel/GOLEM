@@ -6,9 +6,12 @@ use read_fens::read_fens;
 use std::sync::mpsc;
 
 use golem::{
-    board::{Board, wrapped_board::WrappedBoard},
+    board::{
+        Board,
+        wrapped_board::WrappedBoard
+    },
     search::{
-        SearchInfo,
+        SearchInfo, Searchable,
         minimax::minimax,
         transposition_table::TransTable
     }
@@ -40,13 +43,25 @@ fn test_undo() {
         // record state
         let record = board.clone();
 
-        //, do a shallow search (lots of making and unmaking of moves)
-        let (_, stop_rx) = mpsc::channel::<()>();
-        let mut search_info = SearchInfo::default();
-        minimax(&mut board, 2, &mut transposition_table, &stop_rx, &mut search_info).expect("Search failed!");
+        // for each possible move, make that move, do a search, unmake it
+        for r#move in board.get_legal_moves() {
 
-        // assert that board agrees with record
-        assert_eq!(board, record);
+            // make move
+            board.make_move(r#move);
 
+            //, do a shallow search (lots of making and unmaking of moves)
+            let (_, stop_rx) = mpsc::channel::<()>();
+            let mut search_info = SearchInfo::default();
+            minimax(&mut board, 2, &mut transposition_table, &stop_rx, &mut search_info).expect("Search failed!");
+
+            // unmake move
+            board.unmake_move();
+
+            // assert that board agrees with record
+            assert_eq!(board, record);
+
+        }
+
+        
     }
 }
