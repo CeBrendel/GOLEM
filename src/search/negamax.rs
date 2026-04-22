@@ -4,16 +4,21 @@ use std::{collections::BTreeSet, sync::mpsc::Receiver};
 use crate::{
     board::Move,
     search::{
-        SearchInfo, Searchable, Status, Value, evaluate_wrt_root, generics::{Bool, False, True}, move_ordering::{MVVLVAScorer, MoveIterator}, transposition_table::{Hashable, ProbeResult, TransFlag, TransTable}
+        SearchInfo, Searchable, Status, Value, evaluate_wrt_root,
+        generics::{Bool, False, True},
+        move_ordering::{MVVLVAScorer, MoveIterator},
+        transposition_table::{Hashable, ProbeResult, TransFlag, TransTable},
+        quiescence::{Quiescenceable, quiescence_search}
     }
 };
 
 
 const DEBUG: bool = false;
 const USE_TT: bool = true;
+const USE_QUIESCENCE: bool = true;
 
 
-pub fn negamax<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M> + Hashable<V, M>>(
+pub fn negamax<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M> + Hashable<V, M> + Quiescenceable<V, M>>(
     board: &mut B,
     depth: u8,
     transposition_table: &mut TransTable<V, M>,
@@ -23,11 +28,10 @@ pub fn negamax<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M> + Hashab
 
     // will be called with the correct (const) arguments to accomplish the search
     fn inner_negamax<
-        FlipEval: Bool,  // whether the sign of the evaluation needs to be flipped
         IsEntry: Bool,  // whether this is the entrypoint of the recursion (only then we write to the move buffer)
         V: Value,
         M: Move,
-        B: Searchable<M, V> + MVVLVAScorer<M> + Hashable<V, M>
+        B: Searchable<M, V> + MVVLVAScorer<M> + Hashable<V, M> + Quiescenceable<V, M>
     >(
         board: &mut B,
         depth_left: u8,
@@ -120,7 +124,18 @@ pub fn negamax<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M> + Hashab
 
         // base case of the recursion
         if depth_left == 0 {
-            return evaluate_wrt_root(board, distance_to_root);
+            if USE_QUIESCENCE {
+                return quiescence_search(
+                    board, 16,
+                    distance_to_root,
+                    alpha,
+                    beta,
+                    stop_rx,
+                    search_info
+                )
+            } else {
+                return evaluate_wrt_root(board, distance_to_root);
+            }
         }
 
         // get legal moves in current position
@@ -153,7 +168,6 @@ pub fn negamax<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M> + Hashab
 
             // recursive call
             let child_evaluation = -inner_negamax::<
-                FlipEval::Negation,  // this search will be from the opposite point of view
                 False,  // this search will never be the entrypoint of the main search
                 V, M, B
             >(
@@ -236,8 +250,8 @@ pub fn negamax<V: Value, M: Move, B: Searchable<M, V> + MVVLVAScorer<M> + Hashab
 
     // manual dispatch into the right implementation of inner_minimax
     (match board.whites_turn() {
-        true  => inner_negamax::<False, True, V, M, B>,
-        false => inner_negamax::<True,  True, V, M, B>
+        true  => inner_negamax::<True, V, M, B>,
+        false => inner_negamax::<True, V, M, B>
     })(
         board, depth, 0, V::MIN, V::MAX, transposition_table, stop_rx, search_info
     );

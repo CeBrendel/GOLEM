@@ -336,7 +336,6 @@ fn spawn_search_thread<V: Value, M: Move, B: Board<M>>(
 
         // initialize transposition table
         let mut transposition_table = TransTable::new();
-        println!("TT is init!");
         trans_table_is_init.store(true, Ordering::Relaxed);
 
         // repeatedly listen for search instructions

@@ -9,7 +9,10 @@ use crate::{
         FILES, RANKS
     },
     search::{
-        Searchable, Status, Value, move_ordering::MVVLVAScorer, transposition_table::Hashable
+        Searchable, Status, Value,
+        move_ordering::MVVLVAScorer,
+        transposition_table::Hashable,
+        quiescence::Quiescenceable
     }
 };
 
@@ -591,5 +594,14 @@ impl Visualizable for WrappedBoard {
 impl Hashable<i32, WrappedMove> for WrappedBoard {
     fn get_zobrist_hash(&self) -> usize {
         return self.board.get_hash() as usize;
+    }
+}
+
+impl Quiescenceable<i32, WrappedMove> for WrappedBoard {
+    fn loud_moves(&self) -> Vec<WrappedMove> {
+        return self.get_legal_moves()
+            .into_iter()
+            .filter(|&r#move| MVVLVAScorer::is_capture(self, r#move))
+            .collect();
     }
 }

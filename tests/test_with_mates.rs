@@ -27,6 +27,28 @@ use chess;
 static MATES_IN_TWO: &str = "tests/fens/MATES_IN_TWO";
 static MATES_IN_THREE: &str = "tests/fens/MATES_IN_THREE";
 
+
+#[test]
+fn minimax_for_mate_in_two() {
+    read_and_test(MATES_IN_TWO, 3, minimax);
+}
+
+#[test]
+fn alpha_beta_for_mate_in_two() {
+    read_and_test(MATES_IN_TWO, 3, alpha_beta);
+}
+
+#[test]
+fn negamax_for_mate_in_two() {
+    read_and_test(MATES_IN_TWO, 3, negamax);
+}
+
+#[test]
+fn negamax_for_mate_in_three() {
+    read_and_test(MATES_IN_THREE, 5, negamax);
+}
+
+
 fn read_and_test(
     str_of_mates: &str,
     ply_depth_to_mate: u8,
@@ -82,24 +104,4 @@ fn read_and_test(
 
     }
 
-}
-
-#[test]
-fn minimax_for_mate_in_two() {
-    read_and_test(MATES_IN_TWO, 3, minimax);
-}
-
-#[test]
-fn alpha_beta_for_mate_in_two() {
-    read_and_test(MATES_IN_TWO, 3, alpha_beta);
-}
-
-#[test]
-fn negamax_for_mate_in_two() {
-    read_and_test(MATES_IN_TWO, 3, negamax);
-}
-
-#[test]
-fn negamax_for_mate_in_three() {
-    read_and_test(MATES_IN_THREE, 5, negamax);
 }
