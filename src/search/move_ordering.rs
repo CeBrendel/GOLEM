@@ -15,7 +15,8 @@ const fn piece_value(piece: Piece) -> i32 {
     };
 }
 
-const PV_SCORE: i32 = 10_000;
+const PV_SCORE: i32 = 100_000;
+const TT_SCORE: i32 = 10_000;
 
 const PIECES: [Piece; 6] = [Piece::Pawn, Piece::Knight, Piece::Bishop, Piece::Rook, Piece::Queen, Piece::King];
 
@@ -78,6 +79,9 @@ impl<M: Move> MoveIterator<M> {
         
         // get pv move
         let pv_move = search_info.pv_table.get_pv_move();
+
+        // check if a transposition table move was given
+        let has_tt_move = maybe_transposition_move != Option::None;
         
         let mut scores = Vec::with_capacity(n_moves);
         for &r#move in moves.iter() {
@@ -89,6 +93,11 @@ impl<M: Move> MoveIterator<M> {
             if r#move == pv_move {
                 // check if move is in the principal variation
                 score += PV_SCORE;
+            } else if has_tt_move {
+                // check if move is in the principal variation
+                if r#move == maybe_transposition_move.unwrap() {
+                    score += TT_SCORE;
+                }
             } else if board.is_capture(r#move) {
                 // if the move is a capture, calculate its MVV-LVA-score
                 let victim = board.get_victim_of(r#move);
